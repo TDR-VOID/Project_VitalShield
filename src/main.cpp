@@ -18,7 +18,8 @@
 
 #define USER_EMAIL     "test@user.com"
 #define USER_PASSWORD  "testpass"
-// ==========================================================+
+
+// ==========================================================
 
 
 FirebaseData fbdo;
@@ -36,49 +37,20 @@ void TaskSensorReadings(void * parameter);
 void TaskFirebaseSender(void * parameter);
 void initMLX90614();
 void readMLX90614();
+void initFirebase();
+void initWifi();
 
 void setup(){
   Serial.begin(115200);
-
-  // ---------------- WiFi ----------------
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.printf("Connecting to Wi-Fi: %s", WIFI_SSID);
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print(".");
-    delay(250);
-  }
-  Serial.println("\nWi-Fi connected!");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
-
-  // ---------------- Firebase ----------------
-  config.api_key = API_KEY;
-  config.database_url = DATABASE_URL;
-  auth.user.email = USER_EMAIL;
-  auth.user.password = USER_PASSWORD;
-
-  Firebase.begin(&config, &auth);
-  Firebase.reconnectWiFi(true);
-
-  Serial.print("Signing in");
-  while (!Firebase.ready()) {
-    Serial.print(".");
-    delay(500);
-  }
-  Serial.println("\nFirebase ready!");
-
-  if (auth.token.uid.length() > 0)
-    Serial.println("User UID: " + String(auth.token.uid.c_str()));
-  else
-    Serial.println("UID not available yet.");
-
   Serial.println("\n--- Starting Dual-Core IoT Task Setup ---");
 
+  initWifi(); // Initialize WiFi
+  initFirebase(); // Initialize Firebase 
   initMLX90614(); // Call the initialization function
 
 
 
-// ----------------------------------------
+  // ----------------------------------------
   // 1. Sensor Readings Task (Pinned to Core 1)
   // Handles fast, dedicated sensor acquisition.
   // ----------------------------------------
@@ -118,6 +90,9 @@ void loop() {
   vTaskDelay(pdMS_TO_TICKS(10000)); // Check every 10 seconds
 }
 
+
+
+
 // ------------------------------------------------------------------
 // TASK IMPLEMENTATIONS
 // ------------------------------------------------------------------
@@ -143,14 +118,11 @@ void TaskSensorReadings(void * parameter) {
 void TaskFirebaseSender(void * parameter) {
   Serial.println("[CORE 0 - FIREBASE] Task started.");
   
-  // *** PLACE YOUR WIFI & FIREBASE INITIALIZATION CODE HERE ***
-  // e.g., WiFi.begin(), Firebase.begin()
-  // ...
 
   for (;;) {
     // 1. Check if the sensor read was successful before sending
     
-        // ---- Create JSON payload ----
+    // ---- Create JSON payload ----
     FirebaseJson json;
     json.set("Ambient", ambient);
     json.set("Object", object);
@@ -173,6 +145,48 @@ void TaskFirebaseSender(void * parameter) {
 
 
 
+
+
+void initFirebase() {
+// ---------------- Firebase ----------------
+  config.api_key = API_KEY;
+  config.database_url = DATABASE_URL;
+  auth.user.email = USER_EMAIL;
+  auth.user.password = USER_PASSWORD;
+
+  Firebase.begin(&config, &auth);
+  Firebase.reconnectWiFi(true);
+
+  Serial.print("Signing in");
+  while (!Firebase.ready()) {
+    Serial.print(".");
+    delay(500);
+  }
+  Serial.println("\nFirebase ready!");
+
+  if (auth.token.uid.length() > 0)
+    Serial.println("User UID: " + String(auth.token.uid.c_str()));
+  else
+    Serial.println("UID not available yet.");
+}
+
+
+
+void initWifi(){
+  // ---------------- WiFi ----------------
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.printf("Connecting to Wi-Fi: %s", WIFI_SSID);
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(250);
+  }
+  Serial.println("\nWi-Fi connected!");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+
+}
+
+
 /**
  * @brief Initialize the MLX90614 sensor
  */
@@ -189,7 +203,9 @@ void initMLX90614() {
   }
 }
 
-/**
+
+
+/** 
  * @brief Read and print MLX90614 temperature data
  */
 void readMLX90614() {
