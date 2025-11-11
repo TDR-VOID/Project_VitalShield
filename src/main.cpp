@@ -2,6 +2,8 @@
 
 #include <Wire.h>
 #include <Adafruit_MLX90614.h>
+#include <Adafruit_AHTX0.h>
+
 
 #include <WiFi.h>
 #include <Firebase_ESP_Client.h>
@@ -27,10 +29,13 @@ FirebaseAuth auth;
 FirebaseConfig config;
 
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
+Adafruit_AHTX0 aht;
 
 
 float ambient;
-float object; 
+float object;
+float relative_humidity;
+float temperature; 
 
 // --- Task Prototypes ---
 void TaskSensorReadings(void * parameter);
@@ -39,13 +44,17 @@ void initMLX90614();
 void readMLX90614();
 void initFirebase();
 void initWifi();
+void initAHT10();
+void readAHT10();
 
 void setup(){
   Serial.begin(115200);
+  Wire.begin(); // Start I2C communication
   Serial.println("\n--- Starting Dual-Core IoT Task Setup ---");
 
   initWifi(); // Initialize WiFi
-  initFirebase(); // Initialize Firebase 
+  initFirebase(); // Initialize Firebase
+  initAHT10(); // Initialize AHT10 Sensor 
   initMLX90614(); // Call the initialization function
 
 
@@ -105,7 +114,7 @@ void TaskSensorReadings(void * parameter) {
   
   for (;;) {
 
-
+    readAHT10(); // Call the AHT10 reading function
     readMLX90614(); // Call the reading function
     delay(1000);
     vTaskDelay(pdMS_TO_TICKS(2000)); 
@@ -126,6 +135,8 @@ void TaskFirebaseSender(void * parameter) {
     FirebaseJson json;
     json.set("Ambient", ambient);
     json.set("Object", object);
+    json.set("Humidity", relative_humidity);
+    json.set("Temperature", temperature);
 
     // Each user has their own folder
     String path = "/Sensor_Data/";
@@ -187,11 +198,48 @@ void initWifi(){
 }
 
 
+
+/**
+ * @brief Initialize the AHT10 sensor
+ */
+void initAHT10() {
+  Serial.println("\n--- AHT10/AHTX0 Test ---");
+  
+  if (aht.begin()) {
+    Serial.println("AHT10/AHTX0 Connection Successful!");
+  } else {
+    Serial.println("AHT10/AHTX0 Connection FAILED. Check wiring/address.");
+    while (true) delay(1000); 
+  }
+}
+
+
+/** 
+ * @brief Read and print AHT10 data
+ */
+
+
+void readAHT10() {
+  sensors_event_t humidity, temp;
+  
+  if (aht.getEvent(&humidity, &temp)) {
+    Serial.print("Temperature: ");
+    Serial.print(temp.temperature);
+    temperature = temp.temperature;
+    Serial.print(" *C\tHumidity: ");
+    Serial.print(humidity.relative_humidity);
+    relative_humidity = humidity.relative_humidity;
+    Serial.println(" %");
+  } else {
+    Serial.println("AHT10/AHTX0 Failed to read data!");
+  }
+}
+
+
 /**
  * @brief Initialize the MLX90614 sensor
  */
 void initMLX90614() {
-  Wire.begin(); // Start I2C communication
   Serial.println("\n--- MLX90614 Initialization ---");
 
   if (mlx.begin()) {
