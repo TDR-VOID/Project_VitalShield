@@ -1,27 +1,82 @@
 #include <Arduino.h>
 
 #include <Wire.h>
-#include "i2c_scanner.h" // Include the header file for the I2C scanner
-#include "sensor_handler.h"
+#include <Adafruit_MLX90614.h>
+
+#include <WiFi.h>
+#include <Firebase_ESP_Client.h>
+#include "addons/TokenHelper.h"
+#include "addons/RTDBHelper.h"
+
+
+// ===================== CONFIGURE HERE =====================
+#define WIFI_SSID      "2263081slt"
+#define WIFI_PASSWORD  "199202FJ5"
+
+#define API_KEY        "AIzaSyB6n9Dv6ANuWBl5qLZ6AqusQCsGBuIQpzU"
+#define DATABASE_URL   "https://uoc-project-acf0b-default-rtdb.firebaseio.com/"
+
+#define USER_EMAIL     "test@user.com"
+#define USER_PASSWORD  "testpass"
+// ==========================================================+
+
+
+FirebaseData fbdo;
+FirebaseAuth auth;
+FirebaseConfig config;
+
+Adafruit_MLX90614 mlx = Adafruit_MLX90614();
+
+
+float ambient;
+float object; 
 
 // --- Task Prototypes ---
 void TaskSensorReadings(void * parameter);
 void TaskFirebaseSender(void * parameter);
+void initMLX90614();
+void readMLX90614();
 
 void setup(){
   Serial.begin(115200);
-  Wire.begin(); // Initialize I2C as master
 
-  scanI2CDevices(); // Call the function to scan for I2C devices
+  // ---------------- WiFi ----------------
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.printf("Connecting to Wi-Fi: %s", WIFI_SSID);
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(250);
+  }
+  Serial.println("\nWi-Fi connected!");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+
+  // ---------------- Firebase ----------------
+  config.api_key = API_KEY;
+  config.database_url = DATABASE_URL;
+  auth.user.email = USER_EMAIL;
+  auth.user.password = USER_PASSWORD;
+
+  Firebase.begin(&config, &auth);
+  Firebase.reconnectWiFi(true);
+
+  Serial.print("Signing in");
+  while (!Firebase.ready()) {
+    Serial.print(".");
+    delay(500);
+  }
+  Serial.println("\nFirebase ready!");
+
+  if (auth.token.uid.length() > 0)
+    Serial.println("User UID: " + String(auth.token.uid.c_str()));
+  else
+    Serial.println("UID not available yet.");
 
   Serial.println("\n--- Starting Dual-Core IoT Task Setup ---");
 
-  // Call the centralized sensor initialization function
-  if (initAllSensors()) {
-    Serial.println("[SETUP] Sensor modules successfully initialized.");
-  } else {
-    Serial.println("[SETUP] WARNING: Sensor initialization failed! Check I2C connections.");
-  }
+  initMLX90614(); // Call the initialization function
+
+
 
 // ----------------------------------------
   // 1. Sensor Readings Task (Pinned to Core 1)
@@ -74,18 +129,10 @@ void TaskSensorReadings(void * parameter) {
   Serial.println("[CORE 1 - SENSOR] Task started.");
   
   for (;;) {
-    // 1. Read Data from ALL sensors
-    if (readAndProcessAllSensors()) {
-      Serial.println("[CORE 1 - SENSOR] All sensors successfully read.");
-      
-      // 2. Print all current data (for debug/verification)
-      printAllSensorData();
-    } else {
-      Serial.println("[CORE 1 - SENSOR] ERROR: Failed to read one or more sensors.");
-    }
 
-    // 3. Task Delay
-    // This task runs every 2 seconds.
+
+    readMLX90614(); // Call the reading function
+    delay(1000);
     vTaskDelay(pdMS_TO_TICKS(2000)); 
   }
 }
@@ -102,30 +149,60 @@ void TaskFirebaseSender(void * parameter) {
 
   for (;;) {
     // 1. Check if the sensor read was successful before sending
-    if (currentSensorData.scanSuccess) {
-        
-      // 2. Format and Send Data to Firebase
-      // Use currentSensorData.aht_temperature, currentSensorData.tvoc, etc.
-      Serial.print("[CORE 0 - FIREBASE] Preparing to send data. Temp: ");
-      Serial.print(currentSensorData.aht_temperature);
-      Serial.print(", eCO2: ");
-      Serial.print(currentSensorData.eco2);
-      Serial.println("...");
-
-      // *** PLACE YOUR ACTUAL FIREBASE SENDING CODE HERE ***
-      // Example: Firebase.pushJSON(firebaseData, "/sensor_data", jsonDocument);
-      
-      // Simulate network latency 
-      vTaskDelay(pdMS_TO_TICKS(400)); 
-      
-      Serial.println("[CORE 0 - FIREBASE] Send successful.");
-      
-    } else {
-        Serial.println("[CORE 0 - FIREBASE] Data not sent: Previous sensor read failed.");
-    }
     
+        // ---- Create JSON payload ----
+    FirebaseJson json;
+    json.set("Ambient", ambient);
+    json.set("Object", object);
+
+    // Each user has their own folder
+    String path = "/Sensor_Data/";
+
+    // ---- Upload to Firebase ----
+    if (Firebase.RTDB.setJSON(&fbdo, path.c_str(), &json)) {
+      Serial.println("Uploaded sensor data to Firebase");
+    } else {
+      Serial.print("Upload failed: ");
+      Serial.println(fbdo.errorReason());
+    }
     // 3. Task Delay
     // This task runs every 5 seconds.
     vTaskDelay(pdMS_TO_TICKS(5000)); 
+  }
+}
+
+
+
+/**
+ * @brief Initialize the MLX90614 sensor
+ */
+void initMLX90614() {
+  Wire.begin(); // Start I2C communication
+  Serial.println("\n--- MLX90614 Initialization ---");
+
+  if (mlx.begin()) {
+    Serial.println("✅ MLX90614 Connection Successful!");
+    Serial.println("Ambient and Object temperatures will be displayed.\n");
+  } else {
+    Serial.println("❌ MLX90614 Connection FAILED. Check wiring/address.");
+    while (true) delay(1000); // Halt program if connection fails
+  }
+}
+
+/**
+ * @brief Read and print MLX90614 temperature data
+ */
+void readMLX90614() {
+  ambient = mlx.readAmbientTempC();
+  object = mlx.readObjectTempC();
+
+  if (isnan(ambient) || isnan(object)) {
+    Serial.println("⚠️ Failed to read MLX90614 data!");
+  } else {
+    Serial.print("Ambient: ");
+    Serial.print(ambient);
+    Serial.print(" °C\tObject: ");
+    Serial.print(object);
+    Serial.println(" °C");
   }
 }
