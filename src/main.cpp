@@ -3,6 +3,8 @@
 #include <Wire.h>
 #include <Adafruit_MLX90614.h>
 #include <Adafruit_AHTX0.h>
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
 
 
 #include <WiFi.h>
@@ -21,31 +23,41 @@
 #define USER_EMAIL     "test@user.com"
 #define USER_PASSWORD  "testpass"
 
-// ==========================================================
+// ========================================================== //
 
 
+// --- Firebase objects ---
 FirebaseData fbdo;
 FirebaseAuth auth;
 FirebaseConfig config;
 
+// --- Sensor objects ---
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
 Adafruit_AHTX0 aht;
+Adafruit_MPU6050 mpu;
 
 
 float ambient;
 float object;
 float relative_humidity;
-float temperature; 
+float temperature;
+float accelerationX, accelerationY, accelerationZ;
+float gyroX, gyroY, gyroZ; 
+float temperatureMPU;
 
 // --- Task Prototypes ---
 void TaskSensorReadings(void * parameter);
 void TaskFirebaseSender(void * parameter);
+
+// --- Function Prototypes ---
 void initMLX90614();
 void readMLX90614();
 void initFirebase();
 void initWifi();
 void initAHT10();
 void readAHT10();
+void initMPU6050();
+void readMPU6050();
 
 void setup(){
   Serial.begin(115200);
@@ -56,6 +68,7 @@ void setup(){
   initFirebase(); // Initialize Firebase
   initAHT10(); // Initialize AHT10 Sensor 
   initMLX90614(); // Call the initialization function
+  initMPU6050(); // Initialize MPU6050 Sensor
 
 
 
@@ -116,6 +129,7 @@ void TaskSensorReadings(void * parameter) {
 
     readAHT10(); // Call the AHT10 reading function
     readMLX90614(); // Call the reading function
+    readMPU6050(); // Call the MPU6050 reading function
     delay(1000);
     vTaskDelay(pdMS_TO_TICKS(2000)); 
   }
@@ -137,6 +151,13 @@ void TaskFirebaseSender(void * parameter) {
     json.set("Object", object);
     json.set("Humidity", relative_humidity);
     json.set("Temperature", temperature);
+    json.set("Accel_X", accelerationX);
+    json.set("Accel_Y", accelerationY);
+    json.set("Accel_Z", accelerationZ);
+    json.set("Gyro_X", gyroX);
+    json.set("Gyro_Y", gyroY);
+    json.set("Gyro_Z", gyroZ);
+    json.set("Temp_MPU", temperatureMPU);
 
     // Each user has their own folder
     String path = "/Sensor_Data/";
@@ -154,10 +175,9 @@ void TaskFirebaseSender(void * parameter) {
   }
 }
 
-
-
-
-
+/**
+ * @brief Initialize Firebase connection
+ */
 void initFirebase() {
 // ---------------- Firebase ----------------
   config.api_key = API_KEY;
@@ -182,7 +202,9 @@ void initFirebase() {
 }
 
 
-
+/**
+ * @brief Initialize WiFi connection
+ */
 void initWifi(){
   // ---------------- WiFi ----------------
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -194,7 +216,127 @@ void initWifi(){
   Serial.println("\nWi-Fi connected!");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
+}
 
+
+/**
+ * @brief Initialize the MPU6050 sensor
+ */
+void initMPU6050() {
+  while (!Serial)
+    delay(10); // will pause Zero, Leonardo, etc until serial console opens
+
+  Serial.println("Adafruit MPU6050 test!");
+
+  // Try to initialize!
+  if (!mpu.begin()) {
+    Serial.println("Failed to find MPU6050 chip");
+    while (1) {
+      delay(10);
+    }
+  }
+  Serial.println("MPU6050 Found!");
+
+  mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
+  Serial.print("Accelerometer range set to: ");
+  switch (mpu.getAccelerometerRange()) {
+  case MPU6050_RANGE_2_G:
+    Serial.println("+-2G");
+    break;
+  case MPU6050_RANGE_4_G:
+    Serial.println("+-4G");
+    break;
+  case MPU6050_RANGE_8_G:
+    Serial.println("+-8G");
+    break;
+  case MPU6050_RANGE_16_G:
+    Serial.println("+-16G");
+    break;
+  }
+  mpu.setGyroRange(MPU6050_RANGE_500_DEG);
+  Serial.print("Gyro range set to: ");
+  switch (mpu.getGyroRange()) {
+  case MPU6050_RANGE_250_DEG:
+    Serial.println("+- 250 deg/s");
+    break;
+  case MPU6050_RANGE_500_DEG:
+    Serial.println("+- 500 deg/s");
+    break;
+  case MPU6050_RANGE_1000_DEG:
+    Serial.println("+- 1000 deg/s");
+    break;
+  case MPU6050_RANGE_2000_DEG:
+    Serial.println("+- 2000 deg/s");
+    break;
+  }
+
+  mpu.setFilterBandwidth(MPU6050_BAND_5_HZ);
+  Serial.print("Filter bandwidth set to: ");
+  switch (mpu.getFilterBandwidth()) {
+  case MPU6050_BAND_260_HZ:
+    Serial.println("260 Hz");
+    break;
+  case MPU6050_BAND_184_HZ:
+    Serial.println("184 Hz");
+    break;
+  case MPU6050_BAND_94_HZ:
+    Serial.println("94 Hz");
+    break;
+  case MPU6050_BAND_44_HZ:
+    Serial.println("44 Hz");
+    break;
+  case MPU6050_BAND_21_HZ:
+    Serial.println("21 Hz");
+    break;
+  case MPU6050_BAND_10_HZ:
+    Serial.println("10 Hz");
+    break;
+  case MPU6050_BAND_5_HZ:
+    Serial.println("5 Hz");
+    break;
+  }
+  Serial.println("");
+  delay(100);
+}
+
+
+/** 
+ * @brief Read and print MPU6050 data
+ */
+void readMPU6050() {
+  sensors_event_t a, g, temp;
+  mpu.getEvent(&a, &g, &temp);
+
+  /* Print out the values */
+  Serial.print("Acceleration X: ");
+  Serial.print(a.acceleration.x);
+  accelerationX = a.acceleration.x;
+  Serial.print(", Y: ");
+  Serial.print(a.acceleration.y);
+  accelerationY = a.acceleration.y;
+  Serial.print(", Z: ");
+  Serial.print(a.acceleration.z);
+  accelerationZ = a.acceleration.z;
+  Serial.println(" m/s^2");
+
+  Serial.print("Rotation X: ");
+  Serial.print(g.gyro.x);
+  gyroX = g.gyro.x;
+  Serial.print(", Y: ");
+  Serial.print(g.gyro.y);
+  gyroY = g.gyro.y;
+  Serial.print(", Z: ");
+  Serial.print(g.gyro.z);
+  gyroZ = g.gyro.z;
+  Serial.println(" rad/s");
+
+  Serial.print("Temperature: ");
+  Serial.print(temp.temperature);
+  temperatureMPU = temp.temperature;
+  Serial.println(" degC");
+
+  Serial.println("");
+  delay(500);
 }
 
 
@@ -217,8 +359,6 @@ void initAHT10() {
 /** 
  * @brief Read and print AHT10 data
  */
-
-
 void readAHT10() {
   sensors_event_t humidity, temp;
   
@@ -270,3 +410,4 @@ void readMLX90614() {
     Serial.println(" °C");
   }
 }
+
