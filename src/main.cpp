@@ -23,6 +23,8 @@
 #define USER_EMAIL     "test@user.com"
 #define USER_PASSWORD  "testpass"
 
+#define USER_NAME      "User1"
+
 // ========================================================== //
 
 
@@ -59,6 +61,7 @@ void readAHT10();
 void initMPU6050();
 void readMPU6050();
 void readFirebaseActions();
+void saveFirebaseActions();
 
 void setup(){
   Serial.begin(115200);
@@ -146,55 +149,13 @@ void TaskFirebaseSender(void * parameter) {
   for (;;) {
     // 1. Check if the sensor read was successful before sending
     
-    // ---- Create JSON payload ----
-
-    FirebaseJson AHT10_json, MLX90614_json, MPU6050_json;
-
-    AHT10_json.set("Humidity", relative_humidity);
-    AHT10_json.set("Temperature", temperature);
-
-    MLX90614_json.set("Ambient", ambient);
-    MLX90614_json.set("Object", object);
-
-    MPU6050_json.set("Accel_X", accelerationX);
-    MPU6050_json.set("Accel_Y", accelerationY);
-    MPU6050_json.set("Accel_Z", accelerationZ);
-    MPU6050_json.set("Gyro_X", gyroX);
-    MPU6050_json.set("Gyro_Y", gyroY);
-    MPU6050_json.set("Gyro_Z", gyroZ);
-    MPU6050_json.set("Temp_MPU", temperatureMPU);
-
-
-    // ---- Upload AHT10 data to Firebase ----
-    if (Firebase.RTDB.setJSON(&fbdo, "User1/Sensor_Data/AHT10", &AHT10_json)) {
-      Serial.println("Uploaded AHT10 data to Firebase");
-    } else {
-      Serial.print("Upload failed: ");
-      Serial.println(fbdo.errorReason());
-    }
-
-    // ---- Upload MLX90614 data to Firebase ---- 
-    if (Firebase.RTDB.setJSON(&fbdo,"User1/Sensor_Data/MLX90614", &MLX90614_json)) {
-      Serial.println("Uploaded MLX90614 data to Firebase");
-    } else {
-      Serial.print("Upload failed: ");
-      Serial.println(fbdo.errorReason());
-    }
-
-    // ---- Upload MPU6050 data to Firebase ---- 
-    if (Firebase.RTDB.setJSON(&fbdo,"User1/Sensor_Data/MPU6050", &MPU6050_json)) {
-      Serial.println("Uploaded MPU6050 data to Firebase");
-    } else {
-      Serial.print("Upload failed: ");
-      Serial.println(fbdo.errorReason());
-
-    }
+    saveFirebaseActions();
 
     // 2. Read action commands from Firebase
     readFirebaseActions();
 
-
     // 3. Task Delay
+
     // This task runs every 5 seconds.
     vTaskDelay(pdMS_TO_TICKS(5000)); 
   }
@@ -417,7 +378,6 @@ void initMLX90614() {
 }
 
 
-
 /** 
  * @brief Read and print MLX90614 temperature data
  */
@@ -439,15 +399,15 @@ void readMLX90614() {
 
 
 /**
- * @brief Read and display Firebase action data from User1/Action paths
+ * @brief Read and display Firebase action data 
  */
 void readFirebaseActions() {
   String actionPaths[] = {
-    "User1/Actions/action_1",
-    "User1/Actions/action_2",
-    "User1/Actions/action_3",
-    "User1/Actions/action_4",
-    "User1/Actions/action_5"
+    String(USER_NAME) + "/Actions/action_1",
+    String(USER_NAME) + "/Actions/action_2",
+    String(USER_NAME) + "/Actions/action_3",
+    String(USER_NAME) + "/Actions/action_4",
+    String(USER_NAME) + "/Actions/action_5"
   };
 
   Serial.println("\n--- Firebase Actions ---");
@@ -466,3 +426,54 @@ void readFirebaseActions() {
     }
   }
 }
+
+void saveFirebaseActions() {
+  // Example function to save actions back to Firebase if needed
+
+  // ---- Create JSON payload ----
+
+    FirebaseJson AHT10_json, MLX90614_json, MPU6050_json;
+
+    AHT10_json.set("Humidity", relative_humidity);
+    AHT10_json.set("Temperature", temperature);
+
+    MLX90614_json.set("Ambient", ambient);
+    MLX90614_json.set("Object", object);
+
+    MPU6050_json.set("Accel_X", accelerationX);
+    MPU6050_json.set("Accel_Y", accelerationY);
+    MPU6050_json.set("Accel_Z", accelerationZ);
+    MPU6050_json.set("Gyro_X", gyroX);
+    MPU6050_json.set("Gyro_Y", gyroY);
+    MPU6050_json.set("Gyro_Z", gyroZ);
+    MPU6050_json.set("Temp_MPU", temperatureMPU);
+
+
+    // ---- Upload AHT10 data to Firebase ----
+    if (Firebase.RTDB.setJSON(&fbdo, String(USER_NAME) + "/Sensor_Data/AHT10", &AHT10_json)) {
+      Serial.println("Uploaded AHT10 data to Firebase");
+    } else {
+      Serial.print("Upload failed: ");
+      Serial.println(fbdo.errorReason());
+    }
+
+    // ---- Upload MLX90614 data to Firebase ---- 
+    if (Firebase.RTDB.setJSON(&fbdo, String(USER_NAME) + "/Sensor_Data/MLX90614", &MLX90614_json)) {
+      Serial.println("Uploaded MLX90614 data to Firebase");
+    } else {
+      Serial.print("Upload failed: ");
+      Serial.println(fbdo.errorReason());
+    }
+
+    // ---- Upload MPU6050 data to Firebase ---- 
+    if (Firebase.RTDB.setJSON(&fbdo, String(USER_NAME) + "/Sensor_Data/MPU6050", &MPU6050_json)) {
+      Serial.println("Uploaded MPU6050 data to Firebase");
+    } else {
+      Serial.print("Upload failed: ");
+      Serial.println(fbdo.errorReason());
+
+    }
+
+}
+
+
