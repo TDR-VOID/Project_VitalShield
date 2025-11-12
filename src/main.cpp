@@ -58,6 +58,7 @@ void initAHT10();
 void readAHT10();
 void initMPU6050();
 void readMPU6050();
+void readFirebaseActions();
 
 void setup(){
   Serial.begin(115200);
@@ -188,6 +189,9 @@ void TaskFirebaseSender(void * parameter) {
       Serial.println(fbdo.errorReason());
 
     }
+
+    // 2. Read action commands from Firebase
+    readFirebaseActions();
 
 
     // 3. Task Delay
@@ -432,3 +436,33 @@ void readMLX90614() {
   }
 }
 
+
+
+/**
+ * @brief Read and display Firebase action data from User1/Action paths
+ */
+void readFirebaseActions() {
+  String actionPaths[] = {
+    "User1/Actions/action_1",
+    "User1/Actions/action_2",
+    "User1/Actions/action_3",
+    "User1/Actions/action_4",
+    "User1/Actions/action_5"
+  };
+
+  Serial.println("\n--- Firebase Actions ---");
+  
+  for (int i = 0; i < 5; i++) {
+    if (Firebase.RTDB.getString(&fbdo, actionPaths[i])) {
+      String actionValue = fbdo.stringData();
+      Serial.print(actionPaths[i]);
+      Serial.print(" = ");
+      Serial.println(actionValue);
+    } else {
+      Serial.print("Failed to read ");
+      Serial.print(actionPaths[i]);
+      Serial.print(" - ");
+      Serial.println(fbdo.errorReason());
+    }
+  }
+}
