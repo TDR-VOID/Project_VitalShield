@@ -146,29 +146,50 @@ void TaskFirebaseSender(void * parameter) {
     // 1. Check if the sensor read was successful before sending
     
     // ---- Create JSON payload ----
-    FirebaseJson json;
-    json.set("Ambient", ambient);
-    json.set("Object", object);
-    json.set("Humidity", relative_humidity);
-    json.set("Temperature", temperature);
-    json.set("Accel_X", accelerationX);
-    json.set("Accel_Y", accelerationY);
-    json.set("Accel_Z", accelerationZ);
-    json.set("Gyro_X", gyroX);
-    json.set("Gyro_Y", gyroY);
-    json.set("Gyro_Z", gyroZ);
-    json.set("Temp_MPU", temperatureMPU);
 
-    // Each user has their own folder
-    String path = "/Sensor_Data/";
+    FirebaseJson AHT10_json, MLX90614_json, MPU6050_json;
 
-    // ---- Upload to Firebase ----
-    if (Firebase.RTDB.setJSON(&fbdo, path.c_str(), &json)) {
-      Serial.println("Uploaded sensor data to Firebase");
+    AHT10_json.set("Humidity", relative_humidity);
+    AHT10_json.set("Temperature", temperature);
+
+    MLX90614_json.set("Ambient", ambient);
+    MLX90614_json.set("Object", object);
+
+    MPU6050_json.set("Accel_X", accelerationX);
+    MPU6050_json.set("Accel_Y", accelerationY);
+    MPU6050_json.set("Accel_Z", accelerationZ);
+    MPU6050_json.set("Gyro_X", gyroX);
+    MPU6050_json.set("Gyro_Y", gyroY);
+    MPU6050_json.set("Gyro_Z", gyroZ);
+    MPU6050_json.set("Temp_MPU", temperatureMPU);
+
+
+    // ---- Upload AHT10 data to Firebase ----
+    if (Firebase.RTDB.setJSON(&fbdo, "User1/Sensor_Data/AHT10", &AHT10_json)) {
+      Serial.println("Uploaded AHT10 data to Firebase");
     } else {
       Serial.print("Upload failed: ");
       Serial.println(fbdo.errorReason());
     }
+
+    // ---- Upload MLX90614 data to Firebase ---- 
+    if (Firebase.RTDB.setJSON(&fbdo,"User1/Sensor_Data/MLX90614", &MLX90614_json)) {
+      Serial.println("Uploaded MLX90614 data to Firebase");
+    } else {
+      Serial.print("Upload failed: ");
+      Serial.println(fbdo.errorReason());
+    }
+
+    // ---- Upload MPU6050 data to Firebase ---- 
+    if (Firebase.RTDB.setJSON(&fbdo,"User1/Sensor_Data/MPU6050", &MPU6050_json)) {
+      Serial.println("Uploaded MPU6050 data to Firebase");
+    } else {
+      Serial.print("Upload failed: ");
+      Serial.println(fbdo.errorReason());
+
+    }
+
+
     // 3. Task Delay
     // This task runs every 5 seconds.
     vTaskDelay(pdMS_TO_TICKS(5000)); 
