@@ -6,6 +6,7 @@
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
 
+#include <HardwareSerial.h>
 
 #include <WiFi.h>
 #include <Firebase_ESP_Client.h>
@@ -25,6 +26,8 @@
 
 #define USER_NAME      "User1"
 
+#define TARGET_PHONE_NUMBER "+94769054603"
+
 // ========================================================== //
 
 
@@ -38,7 +41,10 @@ Adafruit_MLX90614 mlx = Adafruit_MLX90614();
 Adafruit_AHTX0 aht;
 Adafruit_MPU6050 mpu;
 
+// --- SIM800A objects ---
+HardwareSerial simSerial(2); // Define the serial port for SIM800A, using UART2, RX2=16, TX2=17
 
+// --- Global Variables ---
 float ambient;
 float object;
 float relative_humidity;
@@ -46,6 +52,7 @@ float temperature;
 float accelerationX, accelerationY, accelerationZ;
 float gyroX, gyroY, gyroZ; 
 float temperatureMPU;
+String Action_1, Action_2, Action_3, Action_4, Action_5;
 
 // --- Task Prototypes ---
 void TaskSensorReadings(void * parameter);
@@ -62,12 +69,21 @@ void initMPU6050();
 void readMPU6050();
 void readFirebaseActions();
 void saveFirebaseActions();
+void sim800a_init();
+void send_sms(String phoneNumber, String message);
+bool checkResponse(String expected, unsigned int timeout);
+void Alert_MSG();
+// ------------------------------------------------------------------ //
 
 void setup(){
   Serial.begin(115200);
   Wire.begin(); // Start I2C communication
   Serial.println("\n--- Starting Dual-Core IoT Task Setup ---");
 
+  // Start the serial communication with the SIM800A module
+  simSerial.begin(9600, SERIAL_8N1, 16, 17); // RX, T
+
+  sim800a_init(); // Initialize SIM800A module
   initWifi(); // Initialize WiFi
   initFirebase(); // Initialize Firebase
   initAHT10(); // Initialize AHT10 Sensor 
@@ -117,8 +133,6 @@ void loop() {
 }
 
 
-
-
 // ------------------------------------------------------------------
 // TASK IMPLEMENTATIONS
 // ------------------------------------------------------------------
@@ -154,7 +168,10 @@ void TaskFirebaseSender(void * parameter) {
     // 2. Read action commands from Firebase
     readFirebaseActions();
 
-    // 3. Task Delay
+    // 3. Send SMS alerts based on actions
+    Alert_MSG();
+
+    // 4. Task Delay
 
     // This task runs every 5 seconds.
     vTaskDelay(pdMS_TO_TICKS(5000)); 
@@ -418,14 +435,31 @@ void readFirebaseActions() {
       Serial.print(actionPaths[i]);
       Serial.print(" = ");
       Serial.println(actionValue);
+
+      // Store the action values in corresponding global variables
+      switch (i) {
+        case 0: Action_1 = actionValue; break;
+        case 1: Action_2 = actionValue; break;
+        case 2: Action_3 = actionValue; break;
+        case 3: Action_4 = actionValue; break;
+        case 4: Action_5 = actionValue; break;
+      }
+
+
     } else {
       Serial.print("Failed to read ");
       Serial.print(actionPaths[i]);
       Serial.print(" - ");
       Serial.println(fbdo.errorReason());
     }
+
+
   }
 }
+
+/**
+ * @brief Save sensor data back to Firebase
+ */
 
 void saveFirebaseActions() {
   // Example function to save actions back to Firebase if needed
@@ -476,4 +510,114 @@ void saveFirebaseActions() {
 
 }
 
+// ----------------------------------------------------------------
+// FUNCTION: Initialize the SIM800A
+// ----------------------------------------------------------------
+void sim800a_init() {
+  Serial.println("Initializing SIM800A...");
+  
+  // Give the module time to boot
+  delay(3000); 
 
+  // Send "AT" command to check connection and sync baud rate
+  simSerial.println("AT");
+  if (!checkResponse("OK", 2000)) {
+    Serial.println("Error: No response from SIM800A. Check wiring and power.");
+    // You might want to halt here or retry
+    while(1);
+  }
+  Serial.println("Module is responding.");
+
+  // Set SMS mode to Text Mode
+  simSerial.println("AT+CMGF=1");
+  if (!checkResponse("OK", 2000)) {
+    Serial.println("Error: Failed to set SMS to text mode.");
+  } else {
+    Serial.println("SIM800A initialized successfully in text mode.");
+  }
+
+  // Optional: Set character set to GSM (default)
+  // simSerial.println("AT+CSCS=\"GSM\"");
+  // checkResponse("OK", 1000);
+}
+
+// ----------------------------------------------------------------
+// FUNCTION: Send an SMS
+// ----------------------------------------------------------------
+void send_sms(String phoneNumber, String message) {
+  Serial.print("Attempting to send SMS to: ");
+  Serial.println(phoneNumber);
+
+  // 1. Set the destination phone number
+  simSerial.print("AT+CMGS=\"");
+  simSerial.print(phoneNumber);
+  simSerial.println("\"");
+
+  // 2. Wait for the ">" prompt from the module
+  if (checkResponse(">", 2000)) {
+    Serial.println("Module is ready to accept message text.");
+    
+    // 3. Send the message text
+    simSerial.print(message);
+    
+    // 4. Send the "Ctrl+Z" character (ASCII 26) to send the message
+    simSerial.write(26);
+
+    // 5. Wait for the "+CMGS:" confirmation
+    // This can take a while (up to 10 seconds)
+    if (checkResponse("+CMGS:", 10000)) {
+      Serial.println("SMS sent successfully!");
+    } else {
+      Serial.println("Error: Failed to send SMS. No +CMGS confirmation.");
+    }
+  } else {
+    Serial.println("Error: Did not receive '>' prompt. Module not ready.");
+  }
+}
+
+// ----------------------------------------------------------------
+// HELPER FUNCTION: Check module response
+// Waits for a specific string in the module's serial reply.
+// ----------------------------------------------------------------
+bool checkResponse(String expected, unsigned int timeout) {
+  String response = "";
+  long int startTime = millis();
+
+  while ((millis() - startTime) < timeout) {
+    while (simSerial.available()) {
+      char c = simSerial.read();
+      response += c;
+    }
+    // Check if the expected string is in the response
+    if (response.indexOf(expected) != -1) {
+      Serial.print("Module Response: ");
+      Serial.println(response); // Print the full response for debugging
+      return true;
+    }
+  }
+  
+  // If we timed out
+  Serial.print("Timeout/Error. Module Response: ");
+  Serial.println(response); // Print whatever we got
+  return false;
+}
+
+
+void Alert_MSG() {
+  if (Action_1 == "ON") {
+    send_sms(TARGET_PHONE_NUMBER, "Alert: Action 1 Triggered!");
+  }
+  if (Action_2 == "ON") {
+    send_sms(TARGET_PHONE_NUMBER, "Alert: Action 2 Triggered!");
+  }
+  if (Action_3 == "ON") {
+    send_sms(TARGET_PHONE_NUMBER, "Alert: Action 3 Triggered!");
+  }
+  if (Action_4 == "ON") {
+    send_sms(TARGET_PHONE_NUMBER, "Alert: Action 4 Triggered!");
+  }
+  if (Action_5 == "ON") {
+    send_sms(TARGET_PHONE_NUMBER, "Alert: Action 5 Triggered!");
+  }
+
+}
