@@ -30,6 +30,10 @@
 
 #define TARGET_PHONE_NUMBER "+94769054603"
 
+// LED Pin Configuration
+#define LED_STATUS_PIN   14   // D14 - Status LED (always on)
+#define LED_DATA_PIN     12   // D12 - Data activity LED (blinks on data transfer)
+
 // ========================================================== //
 
 
@@ -94,6 +98,8 @@ void getFormattedDateTime(char* buffer, size_t bufferSize);
 void manageMLDataRotation();
 void syncTimeWithNTP();
 void updateSensorStatusToFirebase();
+void initLEDs();
+void ledDataBlink();
 void sim800a_init();
 void send_sms(String phoneNumber, String message);
 bool checkResponse(String expected, unsigned int timeout);
@@ -104,6 +110,9 @@ void setup(){
   Serial.begin(115200);
   Wire.begin(); // Start I2C communication
   Serial.println("\n--- Starting Dual-Core IoT Task Setup ---");
+
+  // Initialize LEDs
+  initLEDs();
 
   // Start the serial communication with the SIM800A module
   simSerial.begin(9600, SERIAL_8N1, 16, 17); // RX, T
@@ -466,6 +475,44 @@ void syncTimeWithNTP() {
 }
 
 /**
+ * @brief Initialize LED pins
+ */
+void initLEDs() {
+  Serial.println("\n--- Initializing LEDs ---");
+  
+  // Configure LED pins as outputs
+  pinMode(LED_STATUS_PIN, OUTPUT);
+  pinMode(LED_DATA_PIN, OUTPUT);
+  
+  // Turn off both LEDs initially
+  digitalWrite(LED_STATUS_PIN, LOW);
+  digitalWrite(LED_DATA_PIN, LOW);
+  
+  delay(500);
+  
+  // Turn on status LED (stays on)
+  digitalWrite(LED_STATUS_PIN, HIGH);
+  Serial.print("Status LED (D");
+  Serial.print(LED_STATUS_PIN);
+  Serial.println(") turned ON");
+  
+  Serial.print("Data LED (D");
+  Serial.print(LED_DATA_PIN);
+  Serial.println(") ready for data activity");
+}
+
+/**
+ * @brief Blink data LED to indicate Firebase data activity
+ */
+void ledDataBlink() {
+  // Quick blink pattern: ON for 100ms, OFF for 100ms
+  digitalWrite(LED_DATA_PIN, HIGH);
+  delay(100);
+  digitalWrite(LED_DATA_PIN, LOW);
+  delay(100);
+}
+
+/**
  * @brief Initialize the MLX90614 sensor
  */
 void initMLX90614() {
@@ -567,6 +614,9 @@ void readSGP30() {
  * @brief Read and display Firebase action data 
  */
 void readFirebaseActions() {
+  // Blink data LED to indicate Firebase activity
+  ledDataBlink();
+  
   char actionPaths[5][50] = {
     "",
     "",
