@@ -809,34 +809,44 @@ void saveToFirestore() {
   // Add readable date/time
   firestoreData.set("datetime", dateTimeStr);
   
-  // Add AHT10 data
-  FirebaseJson aht10_obj;
-  aht10_obj.set("humidity", relative_humidity);
-  aht10_obj.set("temperature", temperature);
-  firestoreData.set("AHT10", aht10_obj);
-  
-  // Add MLX90614 data
-  FirebaseJson mlx90614_obj;
-  mlx90614_obj.set("ambient", ambient);
-  mlx90614_obj.set("object", object);
-  firestoreData.set("MLX90614", mlx90614_obj);
-  
-  // Add MPU6050 data
-  FirebaseJson mpu6050_obj;
-  mpu6050_obj.set("accel_x", accelerationX);
-  mpu6050_obj.set("accel_y", accelerationY);
-  mpu6050_obj.set("accel_z", accelerationZ);
-  mpu6050_obj.set("gyro_x", gyroX);
-  mpu6050_obj.set("gyro_y", gyroY);
-  mpu6050_obj.set("gyro_z", gyroZ);
-  mpu6050_obj.set("temperature", temperatureMPU);
-  firestoreData.set("MPU6050", mpu6050_obj);
+  if (status_AHT10 == "Working"){
+    // Add AHT10 data
+    FirebaseJson aht10_obj;
+    aht10_obj.set("humidity", relative_humidity);
+    aht10_obj.set("temperature", temperature);
+    firestoreData.set("AHT10", aht10_obj);
+  }  
 
-  // Add SGP30 Air Quality data
-  FirebaseJson sgp30_obj;
-  sgp30_obj.set("tvoc", TVOC);
-  sgp30_obj.set("eco2", eCO2);
-  firestoreData.set("SGP30", sgp30_obj);
+  
+  if (status_MLX90614 == "Working"){
+    // Add MLX90614 data
+    FirebaseJson mlx90614_obj;
+    mlx90614_obj.set("ambient", ambient);
+    mlx90614_obj.set("object", object);
+    firestoreData.set("MLX90614", mlx90614_obj);
+  }
+  
+  if (status_MPU6050 == "Working"){
+    // Add MPU6050 data
+    FirebaseJson mpu6050_obj;
+    mpu6050_obj.set("accel_x", accelerationX);
+    mpu6050_obj.set("accel_y", accelerationY);
+    mpu6050_obj.set("accel_z", accelerationZ);
+    mpu6050_obj.set("gyro_x", gyroX);
+    mpu6050_obj.set("gyro_y", gyroY);
+    mpu6050_obj.set("gyro_z", gyroZ);
+    mpu6050_obj.set("temperature", temperatureMPU);
+    firestoreData.set("MPU6050", mpu6050_obj);
+  }
+
+
+  if (status_SGP30 == "Working"){
+    // Add SGP30 Air Quality data
+    FirebaseJson sgp30_obj;
+    sgp30_obj.set("tvoc", TVOC);
+    sgp30_obj.set("eco2", eCO2);
+    firestoreData.set("SGP30", sgp30_obj);
+  }
 
   // Add action states for context
   FirebaseJson actions_obj;
