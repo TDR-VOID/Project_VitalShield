@@ -17,6 +17,23 @@
 
 
 // ===================== CONFIGURE HERE =====================
+
+// Serial Debug Output Control
+// Set to 1 to enable serial output, 0 to disable (saves performance)
+#define ENABLE_SERIAL_DEBUG 1
+
+// Conditional macro for serial printing
+#if ENABLE_SERIAL_DEBUG
+  #define DEBUG_PRINT(x, ...) Serial.print(x, ##__VA_ARGS__)
+  #define DEBUG_PRINTLN(x, ...) Serial.println(x, ##__VA_ARGS__)
+  #define DEBUG_PRINTF(fmt, ...) Serial.printf(fmt, ##__VA_ARGS__)
+#else
+  #define DEBUG_PRINT(x, ...)
+  #define DEBUG_PRINTLN(x, ...)
+  #define DEBUG_PRINTF(fmt, ...)
+#endif
+
+// ===================== DEVICE CONFIGURATION =====================
 #define WIFI_SSID      "2263081slt"
 #define WIFI_PASSWORD  "199202FJ5"
 
@@ -109,7 +126,7 @@ void Alert_MSG();
 void setup(){
   Serial.begin(115200);
   Wire.begin(); // Start I2C communication
-  Serial.println("\n--- Starting Dual-Core IoT Task Setup ---");
+  DEBUG_PRINTLN("\n--- Starting Dual-Core IoT Task Setup ---");
 
   // Initialize LEDs
   initLEDs();
@@ -141,7 +158,7 @@ void setup(){
     NULL,                    // Task handle
     1                        // Core to pin the task to (1 = Core 1)
   );
-  Serial.println("[SETUP] Sensor Task created on Core 1.");
+  DEBUG_PRINTLN("[SETUP] Sensor Task created on Core 1.");
 
 
   // ----------------------------------------
@@ -157,17 +174,17 @@ void setup(){
     NULL,                    // Task handle
     0                        // Core to pin the task to (0 = Core 0)
   );
-  Serial.println("[SETUP] Firebase Task created on Core 0.");
+  DEBUG_PRINTLN("[SETUP] Firebase Task created on Core 0.");
 }
 
 
 void loop() {
   // Use the main loop for simple, low-priority status/health checks.
-  Serial.print("[LOOP] System Status - Free Heap: ");
-  Serial.print(ESP.getFreeHeap());
-  Serial.print(" bytes | Uptime: ");
-  Serial.print(millis() / 1000);
-  Serial.println(" seconds");
+  DEBUG_PRINT("[LOOP] System Status - Free Heap: ");
+  DEBUG_PRINT(ESP.getFreeHeap());
+  DEBUG_PRINT(" bytes | Uptime: ");
+  DEBUG_PRINT(millis() / 1000);
+  DEBUG_PRINTLN(" seconds");
   vTaskDelay(pdMS_TO_TICKS(10000)); // Check every 10 seconds
 }
 
@@ -180,15 +197,27 @@ void loop() {
  * @brief Task 1: Runs on Core 1, dedicated to sensor acquisition.
  */
 void TaskSensorReadings(void * parameter) {
-  Serial.println("[CORE 1 - SENSOR] Task started.");
+  DEBUG_PRINTLN("[CORE 1 - SENSOR] Task started.");
   
   for (;;) {
 
+    if (status_AHT10 == "Working"){
     readAHT10(); // Call the AHT10 reading function
+    }
+
+    if (status_MLX90614 == "Working"){
     readMLX90614(); // Call the reading function
-    readMPU6050(); // Call the MPU6050 reading function
-    readSGP30(); // Call the SGP30 reading function
-    delay(1000);
+    }
+
+    if (status_MPU6050 == "Working") {
+      readMPU6050(); // Call the MPU6050 reading function
+    }
+
+    if (status_SGP30 == "Working") {
+      readSGP30(); // Call the SGP30 reading function
+    }
+
+    delay(100);
     vTaskDelay(pdMS_TO_TICKS(2000)); 
   }
 }
@@ -197,7 +226,7 @@ void TaskSensorReadings(void * parameter) {
  * @brief Task 2: Runs on Core 0, dedicated to Firebase/network communication.
  */
 void TaskFirebaseSender(void * parameter) {
-  Serial.println("[CORE 0 - FIREBASE] Task started.");
+  DEBUG_PRINTLN("[CORE 0 - FIREBASE] Task started.");
   
   // Reduce buffer size to prevent blocking
   fbdo.setBSSLBufferSize(512, 1024);
@@ -247,19 +276,19 @@ void initFirebase() {
   Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(true);
 
-  Serial.print("Signing in");
+  DEBUG_PRINT("Signing in");
   while (!Firebase.ready()) {
-    Serial.print(".");
+    DEBUG_PRINT(".");
     delay(500);
   }
-  Serial.println("\nFirebase ready!");
+  DEBUG_PRINTLN("\nFirebase ready!");
 
   if (auth.token.uid.length() > 0) {
-    Serial.print("User UID: ");
-    Serial.println(auth.token.uid.c_str());
+    DEBUG_PRINT("User UID: ");
+    DEBUG_PRINTLN(auth.token.uid.c_str());
   }
   else
-    Serial.println("UID not available yet.");
+    DEBUG_PRINTLN("UID not available yet.");
 }
 
 
@@ -269,14 +298,14 @@ void initFirebase() {
 void initWifi(){
   // ---------------- WiFi ----------------
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.printf("Connecting to Wi-Fi: %s", WIFI_SSID);
+  DEBUG_PRINTF("Connecting to Wi-Fi: %s", WIFI_SSID);
   while (WiFi.status() != WL_CONNECTED) {
-    Serial.print(".");
+    DEBUG_PRINT(".");
     delay(250);
   }
-  Serial.println("\nWi-Fi connected!");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
+  DEBUG_PRINTLN("\nWi-Fi connected!");
+  DEBUG_PRINT("IP address: ");
+  DEBUG_PRINTLN(WiFi.localIP());
 }
 
 
@@ -287,20 +316,20 @@ void initMPU6050() {
   while (!Serial)
     delay(10); // will pause Zero, Leonardo, etc until serial console opens
 
-  Serial.println("Adafruit MPU6050 test!");
+  DEBUG_PRINTLN("Adafruit MPU6050 test!");
 
   // Try to initialize!
   if (!mpu.begin()) {
-    Serial.println("Failed to find MPU6050 chip");
+    DEBUG_PRINTLN("Failed to find MPU6050 chip");
     status_MPU6050 = "Not Working";
     return; // Return but don't halt - sensor is optional
   }
   
-  Serial.println("MPU6050 Found!");
+  DEBUG_PRINTLN("MPU6050 Found!");
   status_MPU6050 = "Working";
 
   mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
-  Serial.print("Accelerometer range set to: ");
+  DEBUG_PRINT("Accelerometer range set to: ");
   switch (mpu.getAccelerometerRange()) {
   case MPU6050_RANGE_2_G:
     Serial.println("+-2G");
@@ -319,45 +348,45 @@ void initMPU6050() {
   Serial.print("Gyro range set to: ");
   switch (mpu.getGyroRange()) {
   case MPU6050_RANGE_250_DEG:
-    Serial.println("+- 250 deg/s");
+    DEBUG_PRINTLN("+- 250 deg/s");
     break;
   case MPU6050_RANGE_500_DEG:
-    Serial.println("+- 500 deg/s");
+    DEBUG_PRINTLN("+- 500 deg/s");
     break;
   case MPU6050_RANGE_1000_DEG:
-    Serial.println("+- 1000 deg/s");
+    DEBUG_PRINTLN("+- 1000 deg/s");
     break;
   case MPU6050_RANGE_2000_DEG:
-    Serial.println("+- 2000 deg/s");
+    DEBUG_PRINTLN("+- 2000 deg/s");
     break;
   }
 
   mpu.setFilterBandwidth(MPU6050_BAND_5_HZ);
-  Serial.print("Filter bandwidth set to: ");
+  DEBUG_PRINT("Filter bandwidth set to: ");
   switch (mpu.getFilterBandwidth()) {
   case MPU6050_BAND_260_HZ:
-    Serial.println("260 Hz");
+    DEBUG_PRINTLN("260 Hz");
     break;
   case MPU6050_BAND_184_HZ:
-    Serial.println("184 Hz");
+    DEBUG_PRINTLN("184 Hz");
     break;
   case MPU6050_BAND_94_HZ:
-    Serial.println("94 Hz");
+    DEBUG_PRINTLN("94 Hz");
     break;
   case MPU6050_BAND_44_HZ:
-    Serial.println("44 Hz");
+    DEBUG_PRINTLN("44 Hz");
     break;
   case MPU6050_BAND_21_HZ:
-    Serial.println("21 Hz");
+    DEBUG_PRINTLN("21 Hz");
     break;
   case MPU6050_BAND_10_HZ:
-    Serial.println("10 Hz");
+    DEBUG_PRINTLN("10 Hz");
     break;
   case MPU6050_BAND_5_HZ:
-    Serial.println("5 Hz");
+    DEBUG_PRINTLN("5 Hz");
     break;
   }
-  Serial.println("");
+  DEBUG_PRINTLN("");
   delay(100);
 }
 
@@ -370,34 +399,34 @@ void readMPU6050() {
   mpu.getEvent(&a, &g, &temp);
 
   /* Print out the values */
-  Serial.print("Acceleration X: ");
-  Serial.print(a.acceleration.x);
+  DEBUG_PRINT("Acceleration X: ");
+  DEBUG_PRINT(a.acceleration.x);
   accelerationX = a.acceleration.x;
-  Serial.print(", Y: ");
-  Serial.print(a.acceleration.y);
+  DEBUG_PRINT(", Y: ");
+  DEBUG_PRINT(a.acceleration.y);
   accelerationY = a.acceleration.y;
-  Serial.print(", Z: ");
-  Serial.print(a.acceleration.z);
+  DEBUG_PRINT(", Z: ");
+  DEBUG_PRINT(a.acceleration.z);
   accelerationZ = a.acceleration.z;
-  Serial.println(" m/s^2");
+  DEBUG_PRINTLN(" m/s^2");
 
-  Serial.print("Rotation X: ");
-  Serial.print(g.gyro.x);
+  DEBUG_PRINT("Rotation X: ");
+  DEBUG_PRINT(g.gyro.x);
   gyroX = g.gyro.x;
-  Serial.print(", Y: ");
-  Serial.print(g.gyro.y);
+  DEBUG_PRINT(", Y: ");
+  DEBUG_PRINT(g.gyro.y);
   gyroY = g.gyro.y;
-  Serial.print(", Z: ");
-  Serial.print(g.gyro.z);
+  DEBUG_PRINT(", Z: ");
+  DEBUG_PRINT(g.gyro.z);
   gyroZ = g.gyro.z;
-  Serial.println(" rad/s");
+  DEBUG_PRINTLN(" rad/s");
 
-  Serial.print("Temperature: ");
-  Serial.print(temp.temperature);
+  DEBUG_PRINT("Temperature: ");
+  DEBUG_PRINT(temp.temperature);
   temperatureMPU = temp.temperature;
-  Serial.println(" degC");
+  DEBUG_PRINTLN(" degC");
 
-  Serial.println("");
+  DEBUG_PRINTLN("");
   delay(500);
 }
 
@@ -407,13 +436,13 @@ void readMPU6050() {
  * @brief Initialize the AHT10 sensor
  */
 void initAHT10() {
-  Serial.println("\n--- AHT10/AHTX0 Test ---");
+  DEBUG_PRINTLN("\n--- AHT10/AHTX0 Test ---");
   
   if (aht.begin()) {
-    Serial.println("AHT10/AHTX0 Connection Successful!");
+    DEBUG_PRINTLN("AHT10/AHTX0 Connection Successful!");
     status_AHT10 = "Working";
   } else {
-    Serial.println("AHT10/AHTX0 Connection FAILED. Check wiring/address.");
+    DEBUG_PRINTLN("AHT10/AHTX0 Connection FAILED. Check wiring/address.");
     status_AHT10 = "Not Working";
     // Continue without halting - sensor is optional
   }
@@ -427,15 +456,15 @@ void readAHT10() {
   sensors_event_t humidity, temp;
   
   if (aht.getEvent(&humidity, &temp)) {
-    Serial.print("Temperature: ");
-    Serial.print(temp.temperature);
+    DEBUG_PRINT("Temperature: ");
+    DEBUG_PRINT(temp.temperature);
     temperature = temp.temperature;
-    Serial.print(" *C\tHumidity: ");
-    Serial.print(humidity.relative_humidity);
+    DEBUG_PRINT(" *C\tHumidity: ");
+    DEBUG_PRINT(humidity.relative_humidity);
     relative_humidity = humidity.relative_humidity;
-    Serial.println(" %");
+    DEBUG_PRINTLN(" %");
   } else {
-    Serial.println("AHT10/AHTX0 Failed to read data!");
+    DEBUG_PRINTLN("AHT10/AHTX0 Failed to read data!");
   }
 }
 
@@ -444,33 +473,33 @@ void readAHT10() {
  * @brief Synchronize time with NTP server (Sri Lanka Time: UTC+5:30)
  */
 void syncTimeWithNTP() {
-  Serial.println("Synchronizing time with NTP server (Sri Lanka Time UTC+5:30)...");
+  DEBUG_PRINTLN("Synchronizing time with NTP server (Sri Lanka Time UTC+5:30)...");
   
   // Configure time with NTP server
   // Sri Lanka Timezone: UTC+5:30 (5 hours 30 minutes)
   // Parameters: (gmtOffset_sec, daylightOffset_sec, ntpServer1, ntpServer2, ntpServer3)
   configTime(5 * 3600 + 30 * 60, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
   
-  Serial.print("Waiting for NTP time sync: ");
+  DEBUG_PRINT("Waiting for NTP time sync: ");
   
   time_t now = time(nullptr);
   int timeout = 30; // 30 seconds timeout
   
   while (now < 24 * 3600 && timeout > 0) {
     delay(500);
-    Serial.print(".");
+    DEBUG_PRINT(".");
     now = time(nullptr);
     timeout--;
   }
   
-  Serial.println();
+  DEBUG_PRINTLN();
   
   if (now > 24 * 3600) {
     struct tm* timeinfo = localtime(&now);
-    Serial.print("Time synchronized! Sri Lanka Time: ");
-    Serial.println(asctime(timeinfo));
+    DEBUG_PRINT("Time synchronized! Sri Lanka Time: ");
+    DEBUG_PRINTLN(asctime(timeinfo));
   } else {
-    Serial.println("WARNING: Failed to synchronize time with NTP. Using default time.");
+    DEBUG_PRINTLN("WARNING: Failed to synchronize time with NTP. Using default time.");
   }
 }
 
@@ -478,7 +507,7 @@ void syncTimeWithNTP() {
  * @brief Initialize LED pins
  */
 void initLEDs() {
-  Serial.println("\n--- Initializing LEDs ---");
+  DEBUG_PRINTLN("\n--- Initializing LEDs ---");
   
   // Configure LED pins as outputs
   pinMode(LED_STATUS_PIN, OUTPUT);
@@ -492,13 +521,13 @@ void initLEDs() {
   
   // Turn on status LED (stays on)
   digitalWrite(LED_STATUS_PIN, HIGH);
-  Serial.print("Status LED (D");
-  Serial.print(LED_STATUS_PIN);
-  Serial.println(") turned ON");
+  DEBUG_PRINT("Status LED (D");
+  DEBUG_PRINT(LED_STATUS_PIN);
+  DEBUG_PRINTLN(") turned ON");
   
-  Serial.print("Data LED (D");
-  Serial.print(LED_DATA_PIN);
-  Serial.println(") ready for data activity");
+  DEBUG_PRINT("Data LED (D");
+  DEBUG_PRINT(LED_DATA_PIN);
+  DEBUG_PRINTLN(") ready for data activity");
 }
 
 /**
@@ -516,14 +545,14 @@ void ledDataBlink() {
  * @brief Initialize the MLX90614 sensor
  */
 void initMLX90614() {
-  Serial.println("\n--- MLX90614 Initialization ---");
+  DEBUG_PRINTLN("\n--- MLX90614 Initialization ---");
 
   if (mlx.begin()) {
-    Serial.println("✅ MLX90614 Connection Successful!");
-    Serial.println("Ambient and Object temperatures will be displayed.\n");
+    DEBUG_PRINTLN("✅ MLX90614 Connection Successful!");
+    DEBUG_PRINTLN("Ambient and Object temperatures will be displayed.\n");
     status_MLX90614 = "Working";
   } else {
-    Serial.println("❌ MLX90614 Connection FAILED. Check wiring/address.");
+    DEBUG_PRINTLN("❌ MLX90614 Connection FAILED. Check wiring/address.");
     status_MLX90614 = "Not Working";
     // Continue without halting - sensor is optional
   }
@@ -538,13 +567,13 @@ void readMLX90614() {
   object = mlx.readObjectTempC();
 
   if (isnan(ambient) || isnan(object)) {
-    Serial.println("⚠️ Failed to read MLX90614 data!");
+    DEBUG_PRINTLN("⚠️ Failed to read MLX90614 data!");
   } else {
-    Serial.print("Ambient: ");
-    Serial.print(ambient);
-    Serial.print(" °C\tObject: ");
-    Serial.print(object);
-    Serial.println(" °C");
+    DEBUG_PRINT("Ambient: ");
+    DEBUG_PRINT(ambient);
+    DEBUG_PRINT(" °C\tObject: ");
+    DEBUG_PRINT(object);
+    DEBUG_PRINTLN(" °C");
   }
 }
 
@@ -553,18 +582,18 @@ void readMLX90614() {
  * @brief Initialize the SGP30 Air Quality Sensor
  */
 void initSGP30() {
-  Serial.println("\n--- SGP30 Initialization ---");
+  DEBUG_PRINTLN("\n--- SGP30 Initialization ---");
 
   if (!sgp.begin()) {
-    Serial.println("❌ SGP30 Connection FAILED. Check wiring/address (0x58).");
+    DEBUG_PRINTLN("❌ SGP30 Connection FAILED. Check wiring/address (0x58).");
     status_SGP30 = "Not Working";
     // Continue without halting - sensor is optional
   } else {
-    Serial.println("✅ SGP30 Connection Successful!");
-    Serial.print("Found SGP30 serial #");
-    Serial.print(sgp.serialnumber[0], HEX);
-    Serial.print(sgp.serialnumber[1], HEX);
-    Serial.println(sgp.serialnumber[2], HEX);
+    DEBUG_PRINTLN("✅ SGP30 Connection Successful!");
+    DEBUG_PRINT("Found SGP30 serial #");
+    DEBUG_PRINT(sgp.serialnumber[0], HEX);
+    DEBUG_PRINT(sgp.serialnumber[1], HEX);
+    DEBUG_PRINTLN(sgp.serialnumber[2], HEX);
     status_SGP30 = "Working";
     
     // Set humidity compensation (optional but recommended)
@@ -580,18 +609,18 @@ void initSGP30() {
 void readSGP30() {
   // SGP30 should be read every 1 second
   if (!sgp.IAQmeasure()) {
-    Serial.println("⚠️ Failed to read SGP30 data!");
+    DEBUG_PRINTLN("⚠️ Failed to read SGP30 data!");
     return;
   }
   
   TVOC = sgp.TVOC;
   eCO2 = sgp.eCO2;
   
-  Serial.print("TVOC: ");
-  Serial.print(TVOC);
-  Serial.print(" ppb\teCO2: ");
-  Serial.print(eCO2);
-  Serial.println(" ppm");
+  DEBUG_PRINT("TVOC: ");
+  DEBUG_PRINT(TVOC);
+  DEBUG_PRINT(" ppb\teCO2: ");
+  DEBUG_PRINT(eCO2);
+  DEBUG_PRINTLN(" ppm");
   
   // Optional: Get baseline values for calibration
   uint16_t baselineECO2, baselineTVOC;
@@ -599,10 +628,10 @@ void readSGP30() {
   
   if (millis() - lastBaselineTime > 30000) {
     if (sgp.getIAQBaseline(&baselineECO2, &baselineTVOC)) {
-      Serial.print("SGP30 Baseline - eCO2: 0x");
-      Serial.print(baselineECO2, HEX);
-      Serial.print(" TVOC: 0x");
-      Serial.println(baselineTVOC, HEX);
+      DEBUG_PRINT("SGP30 Baseline - eCO2: 0x");
+      DEBUG_PRINT(baselineECO2, HEX);
+      DEBUG_PRINT(" TVOC: 0x");
+      DEBUG_PRINTLN(baselineTVOC, HEX);
     }
     lastBaselineTime = millis();
   }
@@ -635,9 +664,9 @@ void readFirebaseActions() {
   for (int i = 0; i < 5; i++) {
     if (Firebase.RTDB.getString(&fbdo, actionPaths[i])) {
       String actionValue = fbdo.stringData();
-      Serial.print(actionPaths[i]);
-      Serial.print(" = ");
-      Serial.println(actionValue);
+      DEBUG_PRINT(actionPaths[i]);
+      DEBUG_PRINT(" = ");
+      DEBUG_PRINTLN(actionValue);
 
       // Store the action values in corresponding global variables
       switch (i) {
@@ -648,10 +677,10 @@ void readFirebaseActions() {
         case 4: Action_5 = actionValue; break;
       }
     } else {
-      Serial.print("Failed to read ");
-      Serial.print(actionPaths[i]);
-      Serial.print(" - ");
-      Serial.println(fbdo.errorReason());
+      DEBUG_PRINT("Failed to read ");
+      DEBUG_PRINT(actionPaths[i]);
+      DEBUG_PRINT(" - ");
+      DEBUG_PRINTLN(fbdo.errorReason());
     }
     // Yield to prevent watchdog timeout
     vTaskDelay(pdMS_TO_TICKS(50));
@@ -690,10 +719,10 @@ void saveFirebaseActions() {
     char aht10Path[50];
     sprintf(aht10Path, "%s/Sensor_Data/AHT10", USER_NAME);
     if (Firebase.RTDB.setJSON(&fbdo, aht10Path, &AHT10_json)) {
-      Serial.println("Uploaded AHT10 data to Firebase");
+      DEBUG_PRINTLN("Uploaded AHT10 data to Firebase");
     } else {
-      Serial.print("Upload failed: ");
-      Serial.println(fbdo.errorReason());
+      DEBUG_PRINT("Upload failed: ");
+      DEBUG_PRINTLN(fbdo.errorReason());
     }
     vTaskDelay(pdMS_TO_TICKS(50));
 
@@ -701,10 +730,10 @@ void saveFirebaseActions() {
     char mlx90614Path[50];
     sprintf(mlx90614Path, "%s/Sensor_Data/MLX90614", USER_NAME);
     if (Firebase.RTDB.setJSON(&fbdo, mlx90614Path, &MLX90614_json)) {
-      Serial.println("Uploaded MLX90614 data to Firebase");
+      DEBUG_PRINTLN("Uploaded MLX90614 data to Firebase");
     } else {
-      Serial.print("Upload failed: ");
-      Serial.println(fbdo.errorReason());
+      DEBUG_PRINT("Upload failed: ");
+      DEBUG_PRINTLN(fbdo.errorReason());
     }
     vTaskDelay(pdMS_TO_TICKS(50));
 
@@ -712,10 +741,10 @@ void saveFirebaseActions() {
     char mpu6050Path[50];
     sprintf(mpu6050Path, "%s/Sensor_Data/MPU6050", USER_NAME);
     if (Firebase.RTDB.setJSON(&fbdo, mpu6050Path, &MPU6050_json)) {
-      Serial.println("Uploaded MPU6050 data to Firebase");
+      DEBUG_PRINTLN("Uploaded MPU6050 data to Firebase");
     } else {
-      Serial.print("Upload failed: ");
-      Serial.println(fbdo.errorReason());
+      DEBUG_PRINT("Upload failed: ");
+      DEBUG_PRINTLN(fbdo.errorReason());
     }
     vTaskDelay(pdMS_TO_TICKS(50));
 
@@ -723,10 +752,10 @@ void saveFirebaseActions() {
     char sgp30Path[50];
     sprintf(sgp30Path, "%s/Sensor_Data/SGP30", USER_NAME);
     if (Firebase.RTDB.setJSON(&fbdo, sgp30Path, &SGP30_json)) {
-      Serial.println("Uploaded SGP30 data to Firebase");
+      DEBUG_PRINTLN("Uploaded SGP30 data to Firebase");
     } else {
-      Serial.print("Upload failed: ");
-      Serial.println(fbdo.errorReason());
+      DEBUG_PRINT("Upload failed: ");
+      DEBUG_PRINTLN(fbdo.errorReason());
     }
     vTaskDelay(pdMS_TO_TICKS(50));
 
@@ -762,9 +791,9 @@ void manageMLDataRotation() {
   
   // If we exceed MAX_ML_RECORDS, reset to 1 (will overwrite oldest)
   if (mlDataCount > MAX_ML_RECORDS) {
-    Serial.print("[ML Data] Rotating records - exceeded ");
-    Serial.print(MAX_ML_RECORDS);
-    Serial.println(" records. Starting new cycle.");
+    DEBUG_PRINT("[ML Data] Rotating records - exceeded ");
+    DEBUG_PRINT(MAX_ML_RECORDS);
+    DEBUG_PRINTLN(" records. Starting new cycle.");
     mlDataCount = 1;
     
     // Clear old ML data folder to start fresh
@@ -859,14 +888,14 @@ void saveToFirestore() {
 
   // Save to Realtime Database
   if (Firebase.RTDB.setJSON(&fbdo, rtdbPath, &firestoreData)) {
-    Serial.print("[ML Data] Saved at ");
-    Serial.print(dateTimeStr);
-    Serial.print(" (Record ");
-    Serial.print(mlDataCount);
-    Serial.println("/100)");
+    DEBUG_PRINT("[ML Data] Saved at ");
+    DEBUG_PRINT(dateTimeStr);
+    DEBUG_PRINT(" (Record ");
+    DEBUG_PRINT(mlDataCount);
+    DEBUG_PRINTLN("/100)");
   } else {
-    Serial.print("[ML Data] Failed to save: ");
-    Serial.println(fbdo.errorReason());
+    DEBUG_PRINT("[ML Data] Failed to save: ");
+    DEBUG_PRINTLN(fbdo.errorReason());
   }
 }
 
@@ -894,18 +923,18 @@ void updateSensorStatusToFirebase() {
   sprintf(statusPath, "%s/Sensor_Status", USER_NAME);
   
   if (Firebase.RTDB.setJSON(&fbdo, statusPath, &statusJson)) {
-    Serial.println("[Sensor Status] Updated to Firebase");
-    Serial.print("  AHT10: ");
-    Serial.print(status_AHT10);
-    Serial.print(" | MLX90614: ");
-    Serial.print(status_MLX90614);
-    Serial.print(" | MPU6050: ");
-    Serial.print(status_MPU6050);
-    Serial.print(" | SGP30: ");
-    Serial.println(status_SGP30);
+    DEBUG_PRINTLN("[Sensor Status] Updated to Firebase");
+    DEBUG_PRINT("  AHT10: ");
+    DEBUG_PRINT(status_AHT10);
+    DEBUG_PRINT(" | MLX90614: ");
+    DEBUG_PRINT(status_MLX90614);
+    DEBUG_PRINT(" | MPU6050: ");
+    DEBUG_PRINT(status_MPU6050);
+    DEBUG_PRINT(" | SGP30: ");
+    DEBUG_PRINTLN(status_SGP30);
   } else {
-    Serial.print("[Sensor Status] Failed to update: ");
-    Serial.println(fbdo.errorReason());
+    DEBUG_PRINT("[Sensor Status] Failed to update: ");
+    DEBUG_PRINTLN(fbdo.errorReason());
   }
   
   vTaskDelay(pdMS_TO_TICKS(50)); // Yield
@@ -915,7 +944,7 @@ void updateSensorStatusToFirebase() {
 // FUNCTION: Initialize the SIM800A
 // ----------------------------------------------------------------
 void sim800a_init() {
-  Serial.println("Initializing SIM800A...");
+  DEBUG_PRINTLN("Initializing SIM800A...");
   
   // Give the module time to boot
   delay(3000); 
@@ -923,18 +952,18 @@ void sim800a_init() {
   // Send "AT" command to check connection and sync baud rate
   simSerial.println("AT");
   if (!checkResponse("OK", 2000)) {
-    Serial.println("Error: No response from SIM800A. Check wiring and power.");
+    DEBUG_PRINTLN("Error: No response from SIM800A. Check wiring and power.");
     // You might want to halt here or retry
     //while(1);
   }
-  Serial.println("Module is responding.");
+  DEBUG_PRINTLN("Module is responding.");
 
   // Set SMS mode to Text Mode
   simSerial.println("AT+CMGF=1");
   if (!checkResponse("OK", 2000)) {
-    Serial.println("Error: Failed to set SMS to text mode.");
+    DEBUG_PRINTLN("Error: Failed to set SMS to text mode.");
   } else {
-    Serial.println("SIM800A initialized successfully in text mode.");
+    DEBUG_PRINTLN("SIM800A initialized successfully in text mode.");
   }
 
   // Optional: Set character set to GSM (default)
@@ -946,8 +975,8 @@ void sim800a_init() {
 // FUNCTION: Send an SMS
 // ----------------------------------------------------------------
 void send_sms(String phoneNumber, String message) {
-  Serial.print("Attempting to send SMS to: ");
-  Serial.println(phoneNumber);
+  DEBUG_PRINT("Attempting to send SMS to: ");
+  DEBUG_PRINTLN(phoneNumber);
 
   // 1. Set the destination phone number
   simSerial.print("AT+CMGS=\"");
@@ -956,7 +985,7 @@ void send_sms(String phoneNumber, String message) {
 
   // 2. Wait for the ">" prompt from the module
   if (checkResponse(">", 2000)) {
-    Serial.println("Module is ready to accept message text.");
+    DEBUG_PRINTLN("Module is ready to accept message text.");
     
     // 3. Send the message text
     simSerial.print(message);
@@ -967,12 +996,12 @@ void send_sms(String phoneNumber, String message) {
     // 5. Wait for the "+CMGS:" confirmation
     // This can take a while (up to 10 seconds)
     if (checkResponse("+CMGS:", 10000)) {
-      Serial.println("SMS sent successfully!");
+      DEBUG_PRINTLN("SMS sent successfully!");
     } else {
-      Serial.println("Error: Failed to send SMS. No +CMGS confirmation.");
+      DEBUG_PRINTLN("Error: Failed to send SMS. No +CMGS confirmation.");
     }
   } else {
-    Serial.println("Error: Did not receive '>' prompt. Module not ready.");
+    DEBUG_PRINTLN("Error: Did not receive '>' prompt. Module not ready.");
   }
 }
 
@@ -991,15 +1020,15 @@ bool checkResponse(String expected, unsigned int timeout) {
     }
     // Check if the expected string is in the response
     if (response.indexOf(expected) != -1) {
-      Serial.print("Module Response: ");
-      Serial.println(response); // Print the full response for debugging
+      DEBUG_PRINT("Module Response: ");
+      DEBUG_PRINTLN(response); // Print the full response for debugging
       return true;
     }
   }
   
   // If we timed out
-  Serial.print("Timeout/Error. Module Response: ");
-  Serial.println(response); // Print whatever we got
+  DEBUG_PRINT("Timeout/Error. Module Response: ");
+  DEBUG_PRINTLN(response); // Print whatever we got
   return false;
 }
 
