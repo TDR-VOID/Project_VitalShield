@@ -12,6 +12,7 @@
 #include <Firebase_ESP_Client.h>
 #include "addons/TokenHelper.h"
 #include "addons/RTDBHelper.h"
+#include <time.h>
 
 
 // ===================== CONFIGURE HERE =====================
@@ -54,6 +55,11 @@ float gyroX, gyroY, gyroZ;
 float temperatureMPU;
 String Action_1, Action_2, Action_3, Action_4, Action_5;
 
+// ML Training data tracking
+int mlDataCount = 0;
+const int MAX_ML_RECORDS = 100;
+unsigned long firstRecordTime = 0;
+
 // --- Task Prototypes ---
 void TaskSensorReadings(void * parameter);
 void TaskFirebaseSender(void * parameter);
@@ -69,6 +75,10 @@ void initMPU6050();
 void readMPU6050();
 void readFirebaseActions();
 void saveFirebaseActions();
+void saveToFirestore();
+void getFormattedDateTime(char* buffer, size_t bufferSize);
+void manageMLDataRotation();
+void syncTimeWithNTP();
 void sim800a_init();
 void send_sms(String phoneNumber, String message);
 bool checkResponse(String expected, unsigned int timeout);
@@ -89,6 +99,7 @@ void setup(){
   initAHT10(); // Initialize AHT10 Sensor 
   initMLX90614(); // Call the initialization function
   initMPU6050(); // Initialize MPU6050 Sensor
+  syncTimeWithNTP(); // Synchronize time with NTP server
 
 
 
@@ -99,7 +110,7 @@ void setup(){
   xTaskCreatePinnedToCore(
     TaskSensorReadings,      // Function to implement the task
     "Sensor_Reader",         // Name of the task
-    6144,                    // Increased Stack size (6KB) for multiple sensor libraries
+    8192,                    // Increased Stack size (8KB) for multiple sensor libraries
     NULL,                    // Task input parameter
     2,                       // Priority (Higher priority than the Sender)
     NULL,                    // Task handle
@@ -115,7 +126,7 @@ void setup(){
   xTaskCreatePinnedToCore(
     TaskFirebaseSender,      // Function to implement the task
     "Firebase_Sender",       // Name of the task
-    10000,                   // Stack size (10KB - more stack for network ops)
+    12288,                   // Increased Stack size (12KB - more stack for network ops)
     NULL,                    // Task input parameter
     1,                       // Priority
     NULL,                    // Task handle
@@ -127,8 +138,11 @@ void setup(){
 
 void loop() {
   // Use the main loop for simple, low-priority status/health checks.
-  Serial.print("[LOOP] System Status Check - Free Heap: ");
-  Serial.println(ESP.getFreeHeap());
+  Serial.print("[LOOP] System Status - Free Heap: ");
+  Serial.print(ESP.getFreeHeap());
+  Serial.print(" bytes | Uptime: ");
+  Serial.print(millis() / 1000);
+  Serial.println(" seconds");
   vTaskDelay(pdMS_TO_TICKS(10000)); // Check every 10 seconds
 }
 
@@ -159,22 +173,28 @@ void TaskSensorReadings(void * parameter) {
 void TaskFirebaseSender(void * parameter) {
   Serial.println("[CORE 0 - FIREBASE] Task started.");
   
+  // Reduce buffer size to prevent blocking
+  fbdo.setBSSLBufferSize(512, 1024);
 
   for (;;) {
-    // 1. Check if the sensor read was successful before sending
-    
+    // 1. Save sensor data to Firebase
     saveFirebaseActions();
+    vTaskDelay(pdMS_TO_TICKS(100)); // Yield to watchdog
+    
+    // 2. Save data to ML Training collection with timestamp
+    saveToFirestore();
+    vTaskDelay(pdMS_TO_TICKS(100)); // Yield to watchdog
 
-    // 2. Read action commands from Firebase
+    // 3. Read action commands from Firebase
     readFirebaseActions();
+    vTaskDelay(pdMS_TO_TICKS(100)); // Yield to watchdog
 
-    // 3. Send SMS alerts based on actions
+    // 4. Send SMS alerts based on actions
     Alert_MSG();
+    vTaskDelay(pdMS_TO_TICKS(100)); // Yield to watchdog
 
-    // 4. Task Delay
-
-    // This task runs every 5 seconds.
-    vTaskDelay(pdMS_TO_TICKS(5000)); 
+    // 5. Task Delay - This task runs every ~5 seconds total
+    vTaskDelay(pdMS_TO_TICKS(4600)); 
   }
 }
 
@@ -198,8 +218,10 @@ void initFirebase() {
   }
   Serial.println("\nFirebase ready!");
 
-  if (auth.token.uid.length() > 0)
-    Serial.println("User UID: " + String(auth.token.uid.c_str()));
+  if (auth.token.uid.length() > 0) {
+    Serial.print("User UID: ");
+    Serial.println(auth.token.uid.c_str());
+  }
   else
     Serial.println("UID not available yet.");
 }
@@ -354,7 +376,7 @@ void initAHT10() {
     Serial.println("AHT10/AHTX0 Connection Successful!");
   } else {
     Serial.println("AHT10/AHTX0 Connection FAILED. Check wiring/address.");
-    while (true) delay(1000); 
+    //while (true) delay(1000); 
   }
 }
 
@@ -380,6 +402,40 @@ void readAHT10() {
 
 
 /**
+ * @brief Synchronize time with NTP server (Sri Lanka Time: UTC+5:30)
+ */
+void syncTimeWithNTP() {
+  Serial.println("Synchronizing time with NTP server (Sri Lanka Time UTC+5:30)...");
+  
+  // Configure time with NTP server
+  // Sri Lanka Timezone: UTC+5:30 (5 hours 30 minutes)
+  // Parameters: (gmtOffset_sec, daylightOffset_sec, ntpServer1, ntpServer2, ntpServer3)
+  configTime(5 * 3600 + 30 * 60, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
+  
+  Serial.print("Waiting for NTP time sync: ");
+  
+  time_t now = time(nullptr);
+  int timeout = 30; // 30 seconds timeout
+  
+  while (now < 24 * 3600 && timeout > 0) {
+    delay(500);
+    Serial.print(".");
+    now = time(nullptr);
+    timeout--;
+  }
+  
+  Serial.println();
+  
+  if (now > 24 * 3600) {
+    struct tm* timeinfo = localtime(&now);
+    Serial.print("Time synchronized! Sri Lanka Time: ");
+    Serial.println(asctime(timeinfo));
+  } else {
+    Serial.println("WARNING: Failed to synchronize time with NTP. Using default time.");
+  }
+}
+
+/**
  * @brief Initialize the MLX90614 sensor
  */
 void initMLX90614() {
@@ -390,7 +446,7 @@ void initMLX90614() {
     Serial.println("Ambient and Object temperatures will be displayed.\n");
   } else {
     Serial.println("❌ MLX90614 Connection FAILED. Check wiring/address.");
-    while (true) delay(1000); // Halt program if connection fails
+    //while (true) delay(1000); // Halt program if connection fails
   }
 }
 
@@ -419,16 +475,21 @@ void readMLX90614() {
  * @brief Read and display Firebase action data 
  */
 void readFirebaseActions() {
-  String actionPaths[] = {
-    String(USER_NAME) + "/Actions/action_1",
-    String(USER_NAME) + "/Actions/action_2",
-    String(USER_NAME) + "/Actions/action_3",
-    String(USER_NAME) + "/Actions/action_4",
-    String(USER_NAME) + "/Actions/action_5"
+  char actionPaths[5][50] = {
+    "",
+    "",
+    "",
+    "",
+    ""
   };
-
-  Serial.println("\n--- Firebase Actions ---");
   
+  // Build paths using sprintf
+  sprintf(actionPaths[0], "%s/Actions/action_1", USER_NAME);
+  sprintf(actionPaths[1], "%s/Actions/action_2", USER_NAME);
+  sprintf(actionPaths[2], "%s/Actions/action_3", USER_NAME);
+  sprintf(actionPaths[3], "%s/Actions/action_4", USER_NAME);
+  sprintf(actionPaths[4], "%s/Actions/action_5", USER_NAME);
+
   for (int i = 0; i < 5; i++) {
     if (Firebase.RTDB.getString(&fbdo, actionPaths[i])) {
       String actionValue = fbdo.stringData();
@@ -444,16 +505,14 @@ void readFirebaseActions() {
         case 3: Action_4 = actionValue; break;
         case 4: Action_5 = actionValue; break;
       }
-
-
     } else {
       Serial.print("Failed to read ");
       Serial.print(actionPaths[i]);
       Serial.print(" - ");
       Serial.println(fbdo.errorReason());
     }
-
-
+    // Yield to prevent watchdog timeout
+    vTaskDelay(pdMS_TO_TICKS(50));
   }
 }
 
@@ -482,32 +541,161 @@ void saveFirebaseActions() {
     MPU6050_json.set("Gyro_Z", gyroZ);
     MPU6050_json.set("Temp_MPU", temperatureMPU);
 
-
     // ---- Upload AHT10 data to Firebase ----
-    if (Firebase.RTDB.setJSON(&fbdo, String(USER_NAME) + "/Sensor_Data/AHT10", &AHT10_json)) {
+    char aht10Path[50];
+    sprintf(aht10Path, "%s/Sensor_Data/AHT10", USER_NAME);
+    if (Firebase.RTDB.setJSON(&fbdo, aht10Path, &AHT10_json)) {
       Serial.println("Uploaded AHT10 data to Firebase");
     } else {
       Serial.print("Upload failed: ");
       Serial.println(fbdo.errorReason());
     }
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     // ---- Upload MLX90614 data to Firebase ---- 
-    if (Firebase.RTDB.setJSON(&fbdo, String(USER_NAME) + "/Sensor_Data/MLX90614", &MLX90614_json)) {
+    char mlx90614Path[50];
+    sprintf(mlx90614Path, "%s/Sensor_Data/MLX90614", USER_NAME);
+    if (Firebase.RTDB.setJSON(&fbdo, mlx90614Path, &MLX90614_json)) {
       Serial.println("Uploaded MLX90614 data to Firebase");
     } else {
       Serial.print("Upload failed: ");
       Serial.println(fbdo.errorReason());
     }
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     // ---- Upload MPU6050 data to Firebase ---- 
-    if (Firebase.RTDB.setJSON(&fbdo, String(USER_NAME) + "/Sensor_Data/MPU6050", &MPU6050_json)) {
+    char mpu6050Path[50];
+    sprintf(mpu6050Path, "%s/Sensor_Data/MPU6050", USER_NAME);
+    if (Firebase.RTDB.setJSON(&fbdo, mpu6050Path, &MPU6050_json)) {
       Serial.println("Uploaded MPU6050 data to Firebase");
     } else {
       Serial.print("Upload failed: ");
       Serial.println(fbdo.errorReason());
-
     }
+    vTaskDelay(pdMS_TO_TICKS(50));
 
+}
+
+/**
+ * @brief Get formatted date and time string
+ */
+void getFormattedDateTime(char* buffer, size_t bufferSize) {
+  time_t now = time(nullptr);
+  struct tm* timeinfo = localtime(&now);
+  
+  strftime(buffer, bufferSize, "%Y-%m-%d %H:%M:%S", timeinfo);
+}
+
+/**
+ * @brief Manage ML training data rotation - keep only latest 100 records
+ * Uses a simple counter approach - stores metadata about record count
+ */
+void manageMLDataRotation() {
+  char metaPath[80];
+  sprintf(metaPath, "%s/ML_Training_Meta/record_count", USER_NAME);
+  
+  // Read current count
+  if (Firebase.RTDB.getInt(&fbdo, metaPath)) {
+    mlDataCount = fbdo.intData();
+  } else {
+    mlDataCount = 0;
+  }
+  
+  // Increment count
+  mlDataCount++;
+  
+  // If we exceed MAX_ML_RECORDS, reset to 1 (will overwrite oldest)
+  if (mlDataCount > MAX_ML_RECORDS) {
+    Serial.print("[ML Data] Rotating records - exceeded ");
+    Serial.print(MAX_ML_RECORDS);
+    Serial.println(" records. Starting new cycle.");
+    mlDataCount = 1;
+    
+    // Clear old ML data folder to start fresh
+    char clearPath[80];
+    sprintf(clearPath, "%s/ML_Training_Data", USER_NAME);
+    Firebase.RTDB.deleteNode(&fbdo, clearPath);
+  }
+  
+  // Update count in database
+  char countPath[80];
+  sprintf(countPath, "%s/ML_Training_Meta/record_count", USER_NAME);
+  Firebase.RTDB.setInt(&fbdo, countPath, mlDataCount);
+}
+
+/**
+ * @brief Save sensor data to Firebase with timestamp and readable date/time for ML model training
+ */
+void saveToFirestore() {
+  // Manage rotation first
+  manageMLDataRotation();
+  
+  // Get current timestamp in milliseconds
+  unsigned long timestamp = millis();
+  
+  // Create formatted date/time string
+  char dateTimeStr[25];
+  getFormattedDateTime(dateTimeStr, sizeof(dateTimeStr));
+  
+  // Create a new document with record number as ID (ensures ordering)
+  char docId[20];
+  sprintf(docId, "record_%03d", mlDataCount);
+  
+  char rtdbPath[150];
+  sprintf(rtdbPath, "%s/ML_Training_Data/%s", USER_NAME, docId);
+
+  // Create JSON payload with all sensor data and timestamp
+  FirebaseJson firestoreData;
+  
+  // Add timestamp (numeric)
+  firestoreData.set("timestamp_ms", (double)timestamp);
+  
+  // Add readable date/time
+  firestoreData.set("datetime", dateTimeStr);
+  
+  // Add AHT10 data
+  FirebaseJson aht10_obj;
+  aht10_obj.set("humidity", relative_humidity);
+  aht10_obj.set("temperature", temperature);
+  firestoreData.set("AHT10", aht10_obj);
+  
+  // Add MLX90614 data
+  FirebaseJson mlx90614_obj;
+  mlx90614_obj.set("ambient", ambient);
+  mlx90614_obj.set("object", object);
+  firestoreData.set("MLX90614", mlx90614_obj);
+  
+  // Add MPU6050 data
+  FirebaseJson mpu6050_obj;
+  mpu6050_obj.set("accel_x", accelerationX);
+  mpu6050_obj.set("accel_y", accelerationY);
+  mpu6050_obj.set("accel_z", accelerationZ);
+  mpu6050_obj.set("gyro_x", gyroX);
+  mpu6050_obj.set("gyro_y", gyroY);
+  mpu6050_obj.set("gyro_z", gyroZ);
+  mpu6050_obj.set("temperature", temperatureMPU);
+  firestoreData.set("MPU6050", mpu6050_obj);
+
+  // Add action states for context
+  FirebaseJson actions_obj;
+  actions_obj.set("action_1", Action_1);
+  actions_obj.set("action_2", Action_2);
+  actions_obj.set("action_3", Action_3);
+  actions_obj.set("action_4", Action_4);
+  actions_obj.set("action_5", Action_5);
+  firestoreData.set("Actions", actions_obj);
+
+  // Save to Realtime Database
+  if (Firebase.RTDB.setJSON(&fbdo, rtdbPath, &firestoreData)) {
+    Serial.print("[ML Data] Saved at ");
+    Serial.print(dateTimeStr);
+    Serial.print(" (Record ");
+    Serial.print(mlDataCount);
+    Serial.println("/100)");
+  } else {
+    Serial.print("[ML Data] Failed to save: ");
+    Serial.println(fbdo.errorReason());
+  }
 }
 
 // ----------------------------------------------------------------
@@ -524,7 +712,7 @@ void sim800a_init() {
   if (!checkResponse("OK", 2000)) {
     Serial.println("Error: No response from SIM800A. Check wiring and power.");
     // You might want to halt here or retry
-    while(1);
+    //while(1);
   }
   Serial.println("Module is responding.");
 
