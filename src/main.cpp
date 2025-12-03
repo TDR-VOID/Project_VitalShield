@@ -192,8 +192,18 @@ void TaskFirebaseSender(void * parameter) {
   
   // Reduce buffer size to prevent blocking
   fbdo.setBSSLBufferSize(512, 1024);
+  
+  // Flag to track if status was updated on first run
+  static bool firstRun = true;
 
   for (;;) {
+    // 0. On first run, upload sensor status
+    if (firstRun) {
+      updateSensorStatusToFirebase();
+      firstRun = false;
+      vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    
     // 1. Save sensor data to Firebase
     saveFirebaseActions();
     vTaskDelay(pdMS_TO_TICKS(100)); // Yield to watchdog
@@ -273,13 +283,12 @@ void initMPU6050() {
   // Try to initialize!
   if (!mpu.begin()) {
     Serial.println("Failed to find MPU6050 chip");
-    /*
-    while (1) {
-      delay(10);
-    }
-    */
+    status_MPU6050 = "Not Working";
+    return; // Return but don't halt - sensor is optional
   }
+  
   Serial.println("MPU6050 Found!");
+  status_MPU6050 = "Working";
 
   mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
   Serial.print("Accelerometer range set to: ");
@@ -393,9 +402,11 @@ void initAHT10() {
   
   if (aht.begin()) {
     Serial.println("AHT10/AHTX0 Connection Successful!");
+    status_AHT10 = "Working";
   } else {
     Serial.println("AHT10/AHTX0 Connection FAILED. Check wiring/address.");
-    //while (true) delay(1000); 
+    status_AHT10 = "Not Working";
+    // Continue without halting - sensor is optional
   }
 }
 
@@ -463,9 +474,11 @@ void initMLX90614() {
   if (mlx.begin()) {
     Serial.println("✅ MLX90614 Connection Successful!");
     Serial.println("Ambient and Object temperatures will be displayed.\n");
+    status_MLX90614 = "Working";
   } else {
     Serial.println("❌ MLX90614 Connection FAILED. Check wiring/address.");
-    //while (true) delay(1000); // Halt program if connection fails
+    status_MLX90614 = "Not Working";
+    // Continue without halting - sensor is optional
   }
 }
 
@@ -497,6 +510,7 @@ void initSGP30() {
 
   if (!sgp.begin()) {
     Serial.println("❌ SGP30 Connection FAILED. Check wiring/address (0x58).");
+    status_SGP30 = "Not Working";
     // Continue without halting - sensor is optional
   } else {
     Serial.println("✅ SGP30 Connection Successful!");
@@ -504,6 +518,7 @@ void initSGP30() {
     Serial.print(sgp.serialnumber[0], HEX);
     Serial.print(sgp.serialnumber[1], HEX);
     Serial.println(sgp.serialnumber[2], HEX);
+    status_SGP30 = "Working";
     
     // Set humidity compensation (optional but recommended)
     // Uses AHT10 humidity data for better accuracy
@@ -793,6 +808,47 @@ void saveToFirestore() {
     Serial.print("[ML Data] Failed to save: ");
     Serial.println(fbdo.errorReason());
   }
+}
+
+// ----------------------------------------------------------------
+// FUNCTION: Update Sensor Status to Firebase
+// ----------------------------------------------------------------
+void updateSensorStatusToFirebase() {
+  // Create JSON payload with sensor statuses
+  FirebaseJson statusJson;
+  
+  statusJson.set("AHT10", status_AHT10);
+  statusJson.set("MLX90614", status_MLX90614);
+  statusJson.set("MPU6050", status_MPU6050);
+  statusJson.set("SGP30", status_SGP30);
+  
+  // Get current time for last update
+  time_t now = time(nullptr);
+  struct tm* timeinfo = localtime(&now);
+  char timeStr[25];
+  strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", timeinfo);
+  statusJson.set("last_update", timeStr);
+
+  // Upload to Firebase
+  char statusPath[60];
+  sprintf(statusPath, "%s/Sensor_Status", USER_NAME);
+  
+  if (Firebase.RTDB.setJSON(&fbdo, statusPath, &statusJson)) {
+    Serial.println("[Sensor Status] Updated to Firebase");
+    Serial.print("  AHT10: ");
+    Serial.print(status_AHT10);
+    Serial.print(" | MLX90614: ");
+    Serial.print(status_MLX90614);
+    Serial.print(" | MPU6050: ");
+    Serial.print(status_MPU6050);
+    Serial.print(" | SGP30: ");
+    Serial.println(status_SGP30);
+  } else {
+    Serial.print("[Sensor Status] Failed to update: ");
+    Serial.println(fbdo.errorReason());
+  }
+  
+  vTaskDelay(pdMS_TO_TICKS(50)); // Yield
 }
 
 // ----------------------------------------------------------------
