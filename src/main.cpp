@@ -5,6 +5,7 @@
 #include <Adafruit_AHTX0.h>
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
+#include <Adafruit_SGP30.h>
 
 #include <HardwareSerial.h>
 
@@ -41,6 +42,7 @@ FirebaseConfig config;
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
 Adafruit_AHTX0 aht;
 Adafruit_MPU6050 mpu;
+Adafruit_SGP30 sgp;
 
 // --- SIM800A objects ---
 HardwareSerial simSerial(2); // Define the serial port for SIM800A, using UART2, RX2=16, TX2=17
@@ -54,6 +56,16 @@ float accelerationX, accelerationY, accelerationZ;
 float gyroX, gyroY, gyroZ; 
 float temperatureMPU;
 String Action_1, Action_2, Action_3, Action_4, Action_5;
+
+// SGP30 Gas Sensor Variables
+uint16_t TVOC = 0;  // Total Volatile Organic Compounds (ppb)
+uint16_t eCO2 = 0;  // Equivalent CO2 (ppm)
+
+// Sensor Status Variables
+String status_AHT10 = "Initializing";
+String status_MLX90614 = "Initializing";
+String status_MPU6050 = "Initializing";
+String status_SGP30 = "Initializing";
 
 // ML Training data tracking
 int mlDataCount = 0;
@@ -73,12 +85,15 @@ void initAHT10();
 void readAHT10();
 void initMPU6050();
 void readMPU6050();
+void initSGP30();
+void readSGP30();
 void readFirebaseActions();
 void saveFirebaseActions();
 void saveToFirestore();
 void getFormattedDateTime(char* buffer, size_t bufferSize);
 void manageMLDataRotation();
 void syncTimeWithNTP();
+void updateSensorStatusToFirebase();
 void sim800a_init();
 void send_sms(String phoneNumber, String message);
 bool checkResponse(String expected, unsigned int timeout);
@@ -99,6 +114,7 @@ void setup(){
   initAHT10(); // Initialize AHT10 Sensor 
   initMLX90614(); // Call the initialization function
   initMPU6050(); // Initialize MPU6050 Sensor
+  initSGP30(); // Initialize SGP30 Gas Sensor
   syncTimeWithNTP(); // Synchronize time with NTP server
 
 
@@ -162,6 +178,7 @@ void TaskSensorReadings(void * parameter) {
     readAHT10(); // Call the AHT10 reading function
     readMLX90614(); // Call the reading function
     readMPU6050(); // Call the MPU6050 reading function
+    readSGP30(); // Call the SGP30 reading function
     delay(1000);
     vTaskDelay(pdMS_TO_TICKS(2000)); 
   }
@@ -256,9 +273,11 @@ void initMPU6050() {
   // Try to initialize!
   if (!mpu.begin()) {
     Serial.println("Failed to find MPU6050 chip");
+    /*
     while (1) {
       delay(10);
     }
+    */
   }
   Serial.println("MPU6050 Found!");
 
@@ -470,6 +489,64 @@ void readMLX90614() {
 }
 
 
+/**
+ * @brief Initialize the SGP30 Air Quality Sensor
+ */
+void initSGP30() {
+  Serial.println("\n--- SGP30 Initialization ---");
+
+  if (!sgp.begin()) {
+    Serial.println("❌ SGP30 Connection FAILED. Check wiring/address (0x58).");
+    // Continue without halting - sensor is optional
+  } else {
+    Serial.println("✅ SGP30 Connection Successful!");
+    Serial.print("Found SGP30 serial #");
+    Serial.print(sgp.serialnumber[0], HEX);
+    Serial.print(sgp.serialnumber[1], HEX);
+    Serial.println(sgp.serialnumber[2], HEX);
+    
+    // Set humidity compensation (optional but recommended)
+    // Uses AHT10 humidity data for better accuracy
+    sgp.setIAQBaseline(0x8E68, 0x8F41); // Optional baseline values
+  }
+}
+
+
+/**
+ * @brief Read and display SGP30 Air Quality data
+ */
+void readSGP30() {
+  // SGP30 should be read every 1 second
+  if (!sgp.IAQmeasure()) {
+    Serial.println("⚠️ Failed to read SGP30 data!");
+    return;
+  }
+  
+  TVOC = sgp.TVOC;
+  eCO2 = sgp.eCO2;
+  
+  Serial.print("TVOC: ");
+  Serial.print(TVOC);
+  Serial.print(" ppb\teCO2: ");
+  Serial.print(eCO2);
+  Serial.println(" ppm");
+  
+  // Optional: Get baseline values for calibration
+  uint16_t baselineECO2, baselineTVOC;
+  static unsigned long lastBaselineTime = 0;
+  
+  if (millis() - lastBaselineTime > 30000) {
+    if (sgp.getIAQBaseline(&baselineECO2, &baselineTVOC)) {
+      Serial.print("SGP30 Baseline - eCO2: 0x");
+      Serial.print(baselineECO2, HEX);
+      Serial.print(" TVOC: 0x");
+      Serial.println(baselineTVOC, HEX);
+    }
+    lastBaselineTime = millis();
+  }
+}
+
+
 
 /**
  * @brief Read and display Firebase action data 
@@ -525,7 +602,7 @@ void saveFirebaseActions() {
 
   // ---- Create JSON payload ----
 
-    FirebaseJson AHT10_json, MLX90614_json, MPU6050_json;
+    FirebaseJson AHT10_json, MLX90614_json, MPU6050_json, SGP30_json;
 
     AHT10_json.set("Humidity", relative_humidity);
     AHT10_json.set("Temperature", temperature);
@@ -540,6 +617,9 @@ void saveFirebaseActions() {
     MPU6050_json.set("Gyro_Y", gyroY);
     MPU6050_json.set("Gyro_Z", gyroZ);
     MPU6050_json.set("Temp_MPU", temperatureMPU);
+
+    SGP30_json.set("TVOC", TVOC);
+    SGP30_json.set("eCO2", eCO2);
 
     // ---- Upload AHT10 data to Firebase ----
     char aht10Path[50];
@@ -568,6 +648,17 @@ void saveFirebaseActions() {
     sprintf(mpu6050Path, "%s/Sensor_Data/MPU6050", USER_NAME);
     if (Firebase.RTDB.setJSON(&fbdo, mpu6050Path, &MPU6050_json)) {
       Serial.println("Uploaded MPU6050 data to Firebase");
+    } else {
+      Serial.print("Upload failed: ");
+      Serial.println(fbdo.errorReason());
+    }
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    // ---- Upload SGP30 data to Firebase ---- 
+    char sgp30Path[50];
+    sprintf(sgp30Path, "%s/Sensor_Data/SGP30", USER_NAME);
+    if (Firebase.RTDB.setJSON(&fbdo, sgp30Path, &SGP30_json)) {
+      Serial.println("Uploaded SGP30 data to Firebase");
     } else {
       Serial.print("Upload failed: ");
       Serial.println(fbdo.errorReason());
@@ -675,6 +766,12 @@ void saveToFirestore() {
   mpu6050_obj.set("gyro_z", gyroZ);
   mpu6050_obj.set("temperature", temperatureMPU);
   firestoreData.set("MPU6050", mpu6050_obj);
+
+  // Add SGP30 Air Quality data
+  FirebaseJson sgp30_obj;
+  sgp30_obj.set("tvoc", TVOC);
+  sgp30_obj.set("eco2", eCO2);
+  firestoreData.set("SGP30", sgp30_obj);
 
   // Add action states for context
   FirebaseJson actions_obj;
