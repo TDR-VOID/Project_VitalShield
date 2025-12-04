@@ -20,7 +20,7 @@
 
 // Serial Debug Output Control
 // Set to 1 to enable serial output, 0 to disable (saves performance)
-#define ENABLE_SERIAL_DEBUG 1
+#define ENABLE_SERIAL_DEBUG 0
 
 // Conditional macro for serial printing
 #if ENABLE_SERIAL_DEBUG
